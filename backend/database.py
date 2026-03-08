@@ -1,12 +1,19 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base, sessionmaker
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Ganti dengan URL database Anda
-DATABASE_URL = "mysql+pymysql://root:@127.0.0.1:3306/pos_db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
 
 # Dependency untuk mendapatkan session database
 def get_db():
@@ -15,3 +22,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# tabel database
+class Produk(Base):
+    __tablename__ = "produk"
+    id = Column(Integer, primary_key=True, index=True)
+    nama_produk = Column(String(255), index=True)
+    harga = Column(Integer)
+    stok = Column(Integer)
+
+
+
+if __name__ == "__main__":
+    init_db()
