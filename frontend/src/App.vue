@@ -1,7 +1,98 @@
 <template>
   <div id="app">
     <div class="app-background"></div>
-    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }" aria-label="Navigasi samping">
+
+    <!-- AUTHENTICATION UI -->
+    <div v-if="!authState.isAuthenticated" class="auth-container fade-in">
+      <div class="auth-card">
+        <div class="auth-header" style="text-align:center; margin-bottom:24px;">
+          <div class="logo" style="justify-content:center; margin-bottom:16px;">
+            <span class="logo-icon"><component :is="icons.ShieldCheck" size="24" stroke-width="2.5" /></span>
+            <span class="logo-text" style="font-size:20px">SecureTransact</span>
+          </div>
+          <h2 v-if="authView === 'login'">Masuk ke Akun</h2>
+          <h2 v-else-if="authView === 'register'">Daftar Akun Baru</h2>
+          <h2 v-else>Lupa Password</h2>
+        </div>
+        
+        <div v-if="authView === 'login'" class="auth-form">
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" v-model="loginForm.username" placeholder="Masukkan username" @keyup.enter="handleLogin" />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" v-model="loginForm.password" placeholder="Masukkan password" @keyup.enter="handleLogin" />
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+            <button class="btn-link" @click="authView = 'forgot'">Lupa password?</button>
+          </div>
+          <button class="btn-primary full-w" @click="handleLogin" :disabled="loginForm.loading">
+            <component :is="loginForm.loading ? icons.Loader : icons.CheckCircle" size="16" :class="{spin:loginForm.loading}"/>
+            {{ loginForm.loading ? 'Memproses...' : 'Masuk' }}
+          </button>
+          <div style="text-align:center; margin-top:16px; font-size:13px" class="muted">
+            Belum punya akun? <button class="btn-link" style="display:inline; color:var(--c-indigo)" @click="authView = 'register'">Daftar</button>
+          </div>
+        </div>
+
+        <div v-if="authView === 'register'" class="auth-form">
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" v-model="registerForm.username" placeholder="Buat username tanpa spasi" />
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" v-model="registerForm.email" placeholder="nama@email.com" />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" v-model="registerForm.password" placeholder="Minimal 8 karakter" />
+          </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select v-model="registerForm.role" style="background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:12px 16px; border-radius:10px; outline:none; font-family:'Inter',sans-serif;">
+              <option value="kasir">Kasir</option>
+              <option value="manajer">Manajer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button class="btn-primary full-w mt-2" @click="handleRegister" :disabled="registerForm.loading">
+            <component :is="registerForm.loading ? icons.Loader : icons.Plus" size="16" :class="{spin:registerForm.loading}"/>
+            {{ registerForm.loading ? 'Memproses...' : 'Daftar' }}
+          </button>
+          <div style="text-align:center; margin-top:16px; font-size:13px" class="muted">
+            Sudah punya akun? <button class="btn-link" style="display:inline; color:var(--c-indigo)" @click="authView = 'login'">Masuk</button>
+          </div>
+        </div>
+
+        <div v-if="authView === 'forgot'" class="auth-form">
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" v-model="forgotForm.username" placeholder="Username akun Anda" />
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" v-model="forgotForm.email" placeholder="Email yang terdaftar" />
+          </div>
+          <div class="form-group">
+            <label>Password Baru</label>
+            <input type="password" v-model="forgotForm.new_password" placeholder="Password baru" />
+          </div>
+          <button class="btn-primary full-w mt-2" @click="handleForgot" :disabled="forgotForm.loading">
+            <component :is="forgotForm.loading ? icons.Loader : icons.CheckCircle" size="16" :class="{spin:forgotForm.loading}"/>
+            {{ forgotForm.loading ? 'Memproses...' : 'Reset Password' }}
+          </button>
+          <div style="text-align:center; margin-top:16px; font-size:13px" class="muted">
+            Kembali ke <button class="btn-link" style="display:inline; color:var(--c-indigo)" @click="authView = 'login'">Login</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN APP UI -->
+    <template v-else>
+      <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }" aria-label="Navigasi samping">
       <div class="sidebar-header">
         <div class="logo">
           <span class="logo-icon"><component :is="icons.ShieldCheck" size="18" stroke-width="2.5" /></span>
@@ -20,7 +111,20 @@
         <div class="nav-group">
           <span class="nav-label" v-show="!sidebarCollapsed">Utama</span>
           <button
-            v-for="item in navItems"
+            v-for="item in permittedNavMain"
+            :key="item.id"
+            class="nav-item"
+            :class="{ active: currentPage === item.id }"
+            @click="currentPage = item.id"
+          >
+            <span class="nav-icon"><component :is="item.icon" size="18" /></span>
+            <span class="nav-text" v-show="!sidebarCollapsed">{{ item.label }}</span>
+          </button>
+        </div>
+        <div class="nav-group" v-if="permittedNavAdvanced.length > 0">
+          <span class="nav-label" v-show="!sidebarCollapsed">Fitur Lanjutan</span>
+          <button
+            v-for="item in permittedNavAdvanced"
             :key="item.id"
             class="nav-item"
             :class="{ active: currentPage === item.id }"
@@ -33,15 +137,18 @@
       </nav>
       <div class="sidebar-footer" v-show="!sidebarCollapsed">
         <div class="user-info">
-          <div class="user-avatar">C10</div>
+          <div class="user-avatar">{{ authState.user ? authState.user.username.substring(0,2).toUpperCase() : 'U' }}</div>
           <div class="user-details">
-            <span class="user-name">Admin</span>
-            <span class="user-role">Grup C10 · ITENAS</span>
+            <span class="user-name">{{ authState.user ? authState.user.username : 'User' }}</span>
+            <span class="user-role">{{ authState.user ? authState.user.role.toUpperCase() : 'GUEST' }}</span>
           </div>
         </div>
-        <div class="status-dot" :class="backendStatus">
-          <component :is="backendStatus === 'online' ? icons.Server : icons.ServerOff" size="14" />
-          {{ backendStatus === 'online' ? 'Backend Online' : 'Backend Offline' }}
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%">
+          <div class="status-dot" :class="backendStatus">
+            <component :is="backendStatus === 'online' ? icons.Server : icons.ServerOff" size="14" />
+            {{ backendStatus === 'online' ? 'Online' : 'Offline' }}
+          </div>
+          <button class="btn-link danger" @click="handleLogout" style="font-size:12px">Logout</button>
         </div>
       </div>
     </aside>
@@ -142,15 +249,17 @@
           </div>
           <div v-else class="card p-0">
             <table class="data-table full">
-              <thead><tr><th>ID</th><th>Nama Produk</th><th>Harga</th><th>Stok</th><th>Status</th><th>Aksi</th></tr></thead>
+              <thead><tr><th>ID</th><th>Barcode</th><th>Nama Produk</th><th>Harga</th><th>Stok</th><th>Status</th><th>Aksi</th></tr></thead>
               <tbody>
                 <tr v-for="item in filteredInventory" :key="item.id">
                   <td class="mono muted">#{{ item.id }}</td>
+                  <td class="mono">{{ item.barcode || '-' }}</td>
                   <td><strong>{{ item.nama_produk }}</strong></td>
                   <td class="mono">{{ formatRp(item.harga) }}</td>
                   <td><span class="badge" :class="item.stok < 5 ? 'warn':'lunas'">{{ item.stok }} unit</span></td>
                   <td><span class="badge lunas">Aktif</span></td>
                   <td class="actions">
+                    <button class="btn-icon" @click="openEditProduct(item)" title="Edit produk"><component :is="icons.Edit2" size="14"/></button>
                     <button class="btn-icon" @click="addToCart(item)" title="Tambah ke keranjang"><component :is="icons.ShoppingCart" size="14"/></button>
                     <button class="btn-icon danger" @click="deleteProduct(item.id)" title="Hapus"><component :is="icons.Trash2" size="14"/></button>
                   </td>
@@ -165,7 +274,10 @@
           <div class="pos-layout">
             <div class="pos-catalog">
               <div class="card h-full">
-                <div class="card-header"><h3>Katalog Produk</h3><span class="muted">Klik untuk tambah</span></div>
+                <div class="card-header">
+                  <h3>Katalog Produk</h3>
+                  <span class="muted">Klik untuk tambah</span>
+                </div>
                 <div class="product-grid">
                   <div v-for="item in inventoryData" :key="item.id" class="product-card"
                     :class="{'out-of-stock': item.stok === 0}" @click="addToCart(item)">
@@ -204,6 +316,7 @@
                   <div class="cart-footer">
                     <div class="cart-summary">
                       <div class="sum-row"><span>Subtotal</span><span>{{ formatRp(subtotal) }}</span></div>
+                      <div class="sum-row" v-if="diskonPersen > 0" style="color:var(--c-emerald)"><span>Diskon ({{ diskonPersen }}%)</span><span>-{{ formatRp(diskonNominal) }}</span></div>
                       <div class="sum-row"><span>PPN (11%)</span><span>{{ formatRp(tax) }}</span></div>
                       <div class="sum-row total"><span>TOTAL</span><span>{{ formatRp(grandTotal) }}</span></div>
                     </div>
@@ -211,9 +324,32 @@
                       <label>Nama Klien / Perusahaan</label>
                       <input v-model="clientName" type="text" placeholder="PT Maju Jaya..." />
                     </div>
-                    <button class="btn-primary full-w mt-2" @click="checkout" :disabled="!clientName.trim() || processing">
+                    <div style="display:flex; gap:12px; margin-bottom:12px">
+                      <div class="form-group" style="flex:1; margin-bottom:0">
+                        <label>Metode Bayar</label>
+                        <select v-model="paymentMethod" style="width:100%; background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:10px 14px; border-radius:10px; font-size:14px; outline:none">
+                          <option value="tunai">Tunai</option>
+                          <option value="debit">Debit</option>
+                          <option value="e-wallet">E-Wallet</option>
+                          <option value="qris">QRIS</option>
+                        </select>
+                      </div>
+                      <div class="form-group" style="flex:1; margin-bottom:0">
+                        <label>Diskon (%)</label>
+                        <input v-model.number="diskonPersen" type="number" min="0" max="100" placeholder="0" style="width:100%" />
+                      </div>
+                    </div>
+                    <div v-if="paymentMethod === 'tunai'" class="form-group" style="margin-bottom:12px">
+                      <label>Jumlah Bayar (Rp)</label>
+                      <input v-model.number="jumlahBayar" type="number" min="0" placeholder="Masukkan nominal" />
+                      <div v-if="jumlahBayar >= grandTotal && grandTotal > 0" style="font-size:12px; color:var(--c-emerald); margin-top:4px">
+                        Kembalian: {{ formatRp(jumlahBayar - grandTotal) }}
+                      </div>
+                    </div>
+                    
+                    <button class="btn-primary full-w mt-2" @click="checkout" :disabled="!clientName.trim() || processing || (paymentMethod === 'tunai' && jumlahBayar < grandTotal)">
                       <component :is="processing ? icons.Loader : icons.CheckCircle" size="16" :class="{spin:processing}"/>
-                      {{ processing ? 'Memproses...' : 'Checkout & Generate Kontrak' }}
+                      {{ processing ? 'Memproses...' : (paymentMethod === 'tunai' ? 'Checkout & Generate Kontrak' : 'Bayar via Midtrans') }}
                     </button>
                   </div>
                 </div>
@@ -258,9 +394,14 @@
                   <td><strong>{{ tx.client }}</strong></td>
                   <td class="mono bold">{{ formatRp(tx.total) }}</td>
                   <td>
-                    <button v-if="tx.contract" class="btn-link flex items-center gap-1" @click="previewContract(tx)">
-                      <component :is="icons.FileText" size="14"/> Lihat
-                    </button>
+                    <div v-if="tx.contract" class="flex items-center gap-2">
+                      <button class="btn-link flex items-center gap-1" @click="previewContract(tx)" title="Lihat">
+                        <component :is="icons.FileText" size="14"/> Lihat
+                      </button>
+                      <button class="btn-link flex items-center gap-1" @click="downloadContract(tx)" title="Unduh">
+                        <component :is="icons.Download" size="14"/> Unduh
+                      </button>
+                    </div>
                     <span v-else class="muted">—</span>
                   </td>
                   <td><span class="badge" :class="tx.status">{{ tx.status }}</span></td>
@@ -281,24 +422,43 @@
               Tidak ada dokumen kontrak ditemukan.
             </div>
             <div class="contract-list" v-else>
-              <div class="contract-row" v-for="c in filteredContracts" :key="c.id" @click="previewContract(c)">
-                <div class="c-icon-wrap"><component :is="icons.ShieldCheck" size="20" class="text-green" /></div>
-                <div class="c-info">
+              <div class="contract-row" v-for="c in filteredContracts" :key="c.id">
+                <div class="c-icon-wrap" @click="previewContract(c)" style="cursor:pointer"><component :is="icons.ShieldCheck" size="20" class="text-green" /></div>
+                <div class="c-info" @click="previewContract(c)" style="cursor:pointer">
                   <strong>{{ c.title }}</strong>
                   <span class="muted">{{ c.client }}</span>
                 </div>
-                <div class="c-hash">
+                <div class="c-hash" @click="previewContract(c)" style="cursor:pointer">
                   <span class="muted">SHA-256</span>
                   <code>{{ c.hash }}</code>
                 </div>
-                <div class="c-meta">
+                <div class="c-meta" @click="previewContract(c)" style="cursor:pointer">
                   <span class="badge lunas">Terverifikasi</span>
                   <span class="muted">{{ c.date }}</span>
+                </div>
+                <div class="c-actions">
+                   <button class="btn-icon" @click.stop="previewContract(c)" title="Lihat PDF"><component :is="icons.FileText" size="16"/></button>
+                   <button class="btn-icon" @click.stop="downloadContract(c)" title="Unduh PDF"><component :is="icons.Download" size="16"/></button>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        <!-- DETEKSI UANG PALSU -->
+        <DeteksiUangPage v-if="currentPage === 'deteksi-uang'" />
+
+        <!-- I/O SYSTEM -->
+        <IOSystemPage v-if="currentPage === 'io-system'" />
+
+        <!-- PAYMENT GATEWAY -->
+        <MidtransPaymentPage v-if="currentPage === 'payment'" />
+
+        <!-- LAPORAN -->
+        <LaporanPage v-if="currentPage === 'laporan'" />
+
+        <!-- ADMIN PANEL -->
+        <AdminPanelPage v-if="currentPage === 'admin-panel'" />
       </div>
     </main>
 
@@ -306,6 +466,33 @@
     <div class="toast" :class="[{show: toast.show}, toast.type]">
       <component :is="toast.type==='error'?icons.AlertCircle:icons.CheckCircle" size="16"/>
       {{ toast.message }}
+    </div>
+
+    <!-- CONFIRM MODAL -->
+    <div class="modal-overlay" v-if="confirmModal.show" @click.self="closeConfirm">
+      <div class="modal fade-in" style="max-width:400px">
+        <div class="modal-header">
+          <h3>Konfirmasi</h3>
+          <button class="btn-icon" style="margin:0" @click="closeConfirm" aria-label="Tutup"><component :is="icons.X" size="20"/></button>
+        </div>
+        <div class="modal-body" style="padding:24px 20px">
+          <div style="display:flex; align-items:flex-start; gap:16px">
+            <div style="background:rgba(244,63,94,0.1); color:var(--c-rose); padding:12px; border-radius:12px; display:flex">
+              <component :is="icons.AlertTriangle" size="24"/>
+            </div>
+            <div>
+              <strong style="display:block; font-size:16px; margin-bottom:8px; color:var(--text)">{{ confirmModal.title }}</strong>
+              <p class="muted" style="font-size:14px; line-height:1.5">{{ confirmModal.message }}</p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="background:var(--surface2)">
+          <button class="btn-secondary" @click="closeConfirm">Batal</button>
+          <button class="btn-primary" style="background:var(--c-rose); box-shadow:0 4px 12px rgba(244,63,94,0.3)" @click="confirmAction">
+            <component :is="icons.Trash2" size="14" style="margin-right:6px" /> Ya, Hapus
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- MODALS -->
@@ -324,10 +511,48 @@
             <div class="form-group"><label>Harga (Rp)</label><input v-model.number="newProd.harga" type="number" /></div>
             <div class="form-group"><label>Stok</label><input v-model.number="newProd.stok" type="number" /></div>
           </div>
+          <div class="form-group">
+            <label>Barcode</label>
+            <div style="position:relative; display:flex; align-items:center;">
+              <component :is="icons.ScanLine" size="16" style="position:absolute; left:12px; color:var(--muted)" />
+              <input v-model="newProd.barcode" type="text" placeholder="Scan atau ketik barcode..." style="padding-left:36px; width:100%" />
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" @click="showAddProduct = false">Batal</button>
           <button class="btn-primary" @click="submitProduct" :disabled="addingProduct">Simpan Produk</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- EDIT PRODUCT MODAL -->
+    <div class="modal-overlay" v-if="showEditProduct" @click.self="showEditProduct = false">
+      <div class="modal fade-in">
+        <div class="modal-header">
+          <h3>Edit Produk</h3>
+          <button class="btn-icon" style="margin:0" @click="showEditProduct = false" aria-label="Tutup"><component :is="icons.X" size="20"/></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Nama Produk</label>
+            <input v-model="editProd.nama_produk" type="text" />
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Harga (Rp)</label><input v-model.number="editProd.harga" type="number" /></div>
+            <div class="form-group"><label>Stok</label><input v-model.number="editProd.stok" type="number" /></div>
+          </div>
+          <div class="form-group">
+            <label>Barcode</label>
+            <div style="position:relative; display:flex; align-items:center;">
+              <component :is="icons.ScanLine" size="16" style="position:absolute; left:12px; color:var(--muted)" />
+              <input v-model="editProd.barcode" type="text" placeholder="Scan atau ketik barcode..." style="padding-left:36px; width:100%" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="showEditProduct = false">Batal</button>
+          <button class="btn-primary" @click="submitEditProduct">Simpan Perubahan</button>
         </div>
       </div>
     </div>
@@ -372,7 +597,7 @@
         </div>
       </div>
     </div>
-
+    </template>
   </div>
 </template>
 
@@ -382,8 +607,15 @@ import {
   LayoutDashboard, Box, ShoppingCart, ArrowRightLeft, FileCheck, Search, Bell,
   ChevronLeft, ChevronRight, Server, ServerOff, TrendingUp, ArrowRight,
   CheckCircle, AlertOctagon, Plus, Loader, AlertTriangle, Trash2, Package,
-  ShoppingBag, Minus, FileText, ShieldCheck, X, Code, AlertCircle, Lock, ChevronDown
+  ShoppingBag, Minus, FileText, ShieldCheck, X, Code, AlertCircle, Lock, ChevronDown,
+  ScanLine, Activity, CreditCard, LogOut, Users, BarChart3, Edit2, Tag, Download
 } from 'lucide-vue-next'
+import DeteksiUangPage from './components/DeteksiUangPage.vue'
+import IOSystemPage from './components/IOSystemPage.vue'
+import MidtransPaymentPage from './components/MidtransPaymentPage.vue'
+import AdminPanelPage from './components/AdminPanelPage.vue'
+import LaporanPage from './components/LaporanPage.vue'
+import { inventoryApi, transactionApi, kontrakApi, paymentApi } from './services/api.js'
 
 const icons = {
   LayoutDashboard: markRaw(LayoutDashboard), Box: markRaw(Box), ShoppingCart: markRaw(ShoppingCart),
@@ -394,10 +626,12 @@ const icons = {
   Plus: markRaw(Plus), Loader: markRaw(Loader), AlertTriangle: markRaw(AlertTriangle),
   Trash2: markRaw(Trash2), Package: markRaw(Package), ShoppingBag: markRaw(ShoppingBag),
   Minus: markRaw(Minus), FileText: markRaw(FileText), ShieldCheck: markRaw(ShieldCheck),
-  X: markRaw(X), Code: markRaw(Code), AlertCircle: markRaw(AlertCircle), Lock: markRaw(Lock), ChevronDown: markRaw(ChevronDown)
+  X: markRaw(X), Code: markRaw(Code), AlertCircle: markRaw(AlertCircle), Lock: markRaw(Lock), ChevronDown: markRaw(ChevronDown),
+  ScanLine: markRaw(ScanLine), Activity: markRaw(Activity), CreditCard: markRaw(CreditCard),
+  Users: markRaw(Users), BarChart3: markRaw(BarChart3), Edit2: markRaw(Edit2), Tag: markRaw(Tag), Download: markRaw(Download)
 }
 
-const navItems = [
+const navItemsMain = [
   { id: 'dashboard', label: 'Dashboard', icon: icons.LayoutDashboard },
   { id: 'inventory', label: 'Inventaris', icon: icons.Box },
   { id: 'pos', label: 'Point of Sale', icon: icons.ShoppingCart },
@@ -405,7 +639,45 @@ const navItems = [
   { id: 'kontrak', label: 'Kontrak Digital', icon: icons.FileCheck },
 ]
 
-const currentPage = ref('dashboard')
+const navItemsAdvanced = [
+  { id: 'deteksi-uang', label: 'Deteksi Uang', icon: icons.ScanLine },
+  { id: 'io-system', label: 'I/O System', icon: icons.Activity },
+  { id: 'payment', label: 'Monitoring Bayar', icon: icons.CreditCard },
+  { id: 'laporan', label: 'Laporan', icon: icons.BarChart3 },
+  { id: 'admin-panel', label: 'Admin Panel', icon: icons.Users },
+]
+
+const authState = reactive({
+  isAuthenticated: false,
+  user: null,
+  token: null
+})
+
+const authView = ref('login')
+const loginForm = reactive({ username: '', password: '', loading: false })
+const registerForm = reactive({ username: '', email: '', password: '', role: 'kasir', loading: false })
+const forgotForm = reactive({ username: '', email: '', new_password: '', loading: false })
+
+const permittedNavMain = computed(() => {
+  if (!authState.user) return []
+  const role = authState.user.role
+  return navItemsMain.filter(item => {
+    if (role === 'admin') return true
+    if (role === 'kasir') return ['pos', 'inventory', 'transaksi'].includes(item.id)
+    if (role === 'manajer') return ['dashboard', 'transaksi', 'kontrak'].includes(item.id)
+    return false
+  })
+})
+
+const permittedNavAdvanced = computed(() => {
+  if (!authState.user) return []
+  const role = authState.user.role
+  if (role === 'admin') return navItemsAdvanced
+  if (role === 'manajer') return navItemsAdvanced.filter(i => ['payment','io-system','laporan'].includes(i.id))
+  return []
+})
+
+const currentPage = ref('pos')
 const sidebarCollapsed = ref(false)
 const searchQuery = ref('')
 const backendStatus = ref('offline')
@@ -415,11 +687,38 @@ const inventoryLoading = ref(false)
 const inventoryError = ref(null)
 const showAddProduct = ref(false)
 const addingProduct = ref(false)
-const newProd = reactive({ nama_produk: '', harga: 0, stok: 0 })
+const newProd = reactive({ nama_produk: '', harga: 0, stok: 0, barcode: '' })
+const showEditProduct = ref(false)
+const editProd = reactive({ id: null, nama_produk: '', harga: 0, stok: 0, barcode: '' })
+const paymentMethod = ref('tunai')
+const diskonPersen = ref(0)
+const jumlahBayar = ref(0)
+
+const confirmModal = reactive({ show: false, title: '', message: '', onConfirm: null })
+
+function showConfirm(title, message, onConfirm) {
+  confirmModal.title = title
+  confirmModal.message = message
+  confirmModal.onConfirm = onConfirm
+  confirmModal.show = true
+}
+
+function closeConfirm() {
+  confirmModal.show = false
+  confirmModal.onConfirm = null
+}
+
+function confirmAction() {
+  if (confirmModal.onConfirm) confirmModal.onConfirm()
+  closeConfirm()
+}
 
 const cart = ref([])
 const clientName = ref('')
 const processing = ref(false)
+const scannedBarcode = ref('')
+const barcodeInputRef = ref(null)
+
 const txFilter = ref('all')
 const txFilterOpen = ref(false)
 const txFilterOptions = [
@@ -432,16 +731,8 @@ const getTxFilterLabel = computed(() => {
   return f ? f.label : 'Semua Status'
 })
 
-const transactions = ref([
-  { id: 'TRX001', client: 'PT Maju Jaya', items: '3 item', total: 15750000, status: 'lunas', contract: true, date: '03 Apr 2026' },
-  { id: 'TRX002', client: 'CV Teknologi Indo', items: '1 item', total: 4500000, status: 'lunas', contract: true, date: '02 Apr 2026' },
-  { id: 'TRX003', client: 'Budi Santoso', items: '2 item', total: 2200000, status: 'pending', contract: false, date: '01 Apr 2026' },
-])
-
-const contracts = ref([
-  { id: 'KTR001', title: 'Kontrak Pembelian #TRX001', client: 'PT Maju Jaya', hash: 'a3f9c2...b72e1d', date: '03 Apr 2026' },
-  { id: 'KTR002', title: 'Kontrak Pembelian #TRX002', client: 'CV Teknologi Indo', hash: 'c81d44...4a1f9c', date: '02 Apr 2026' },
-])
+const transactions = ref([])
+const contracts = ref([])
 
 const toast = reactive({ show: false, message: '', type: 'success' })
 const showInvoice = ref(false)
@@ -453,6 +744,11 @@ const pagesMeta = {
   pos: { title: 'Point of Sale', subtitle: 'Proses transaksi & checkout' },
   transaksi: { title: 'Riwayat Transaksi', subtitle: 'Log semua transaksi tercatat' },
   kontrak: { title: 'Kontrak Digital', subtitle: 'Dokumen kontrak terverifikasi kriptografi' },
+  'deteksi-uang': { title: 'Deteksi Uang Palsu', subtitle: 'Analisis keaslian uang via kamera — Computer Vision' },
+  'io-system': { title: 'I/O System Transaction', subtitle: 'Monitor alur input/output data transaksi' },
+  payment: { title: 'Payment Gateway', subtitle: 'Pembayaran multi-channel via Midtrans' },
+  laporan: { title: 'Laporan & Export', subtitle: 'Ringkasan penjualan dan export data' },
+  'admin-panel': { title: 'Admin Panel', subtitle: 'Manajemen user & role akses' },
 }
 
 const currentPageMeta = computed(() => pagesMeta[currentPage.value])
@@ -464,22 +760,47 @@ const dashboardStats = computed(() => [
   { label: 'Kontrak Dibuat', value: contracts.value.length, icon: icons.ShieldCheck, trend: 5, color: 'var(--c-purple)' },
 ])
 
-const systemStatus = [
-  { name: 'Backend FastAPI', status: 'online', up: 99 },
-  { name: 'Database MySQL', status: 'online', up: 99 },
-  { name: 'Frontend Vue', status: 'online', up: 100 },
-]
+const systemStatus = ref([])
+const secChecks = ref([])
+const payConfig = ref({ is_production: false, client_key: '', snap_url: '' })
 
-const secChecks = ref([
-  { name: 'HTTPS / TLS 1.2+', ok: true },
-  { name: 'Rate Limiting', ok: false },
-  { name: 'JWT Authentication', ok: true },
-  { name: 'Input Validation', ok: true },
-])
+async function fetchSystemStatus() {
+  try {
+    const res = await fetch('http://localhost:8000/system-status')
+    if (res.ok) {
+      const data = await res.json()
+      systemStatus.value = data.data.system_status
+      secChecks.value = data.data.sec_checks
+      backendStatus.value = 'online'
+    } else {
+      backendStatus.value = 'offline'
+    }
+  } catch(e) {
+    console.error('Fetch system status error', e)
+    backendStatus.value = 'offline'
+  }
+}
+
+async function loadPayConfig() {
+  try {
+    const res = await paymentApi.getConfig()
+    payConfig.value = res.data
+    if(payConfig.value.snap_url && !document.querySelector(`script[src="${payConfig.value.snap_url}"]`)) {
+      const s = document.createElement('script')
+      s.src = payConfig.value.snap_url
+      s.setAttribute('data-client-key', payConfig.value.client_key)
+      document.head.appendChild(s)
+    }
+  } catch(e) { console.error('Failed to load pay config', e) }
+}
 
 const filteredInventory = computed(() => {
   if (!searchQuery.value) return inventoryData.value
-  return inventoryData.value.filter(i => i.nama_produk.toLowerCase().includes(searchQuery.value.toLowerCase()))
+  const q = searchQuery.value.toLowerCase()
+  return inventoryData.value.filter(i => 
+    i.nama_produk.toLowerCase().includes(q) || 
+    (i.barcode && i.barcode.toLowerCase().includes(q))
+  )
 })
 
 const filteredTx = computed(() => {
@@ -509,8 +830,10 @@ const filteredContracts = computed(() => {
 })
 
 const subtotal = computed(() => cart.value.reduce((s,i) => s + i.harga * i.qty, 0))
-const tax = computed(() => Math.round(subtotal.value * 0.11))
-const grandTotal = computed(() => subtotal.value + tax.value)
+const diskonNominal = computed(() => Math.round(subtotal.value * diskonPersen.value / 100))
+const setelahDiskon = computed(() => subtotal.value - diskonNominal.value)
+const tax = computed(() => Math.round(setelahDiskon.value * 0.11))
+const grandTotal = computed(() => setelahDiskon.value + tax.value)
 
 function formatRp(v) { return typeof v === 'number' ? 'Rp ' + v.toLocaleString('id-ID') : v }
 
@@ -522,31 +845,72 @@ function showToast(msg, type='success') {
 async function fetchInventory() {
   inventoryLoading.value = true; inventoryError.value = null
   try {
-    const res = await fetch('http://localhost:8000/inventory/')
-    if (!res.ok) throw new Error()
-    inventoryData.value = (await res.json()).data || []
+    const res = await inventoryApi.getAll()
+    inventoryData.value = res.data || []
     backendStatus.value = 'online'
-  } catch {
-    inventoryError.value = 'Tidak dapat terhubung ke backend. Menampilkan versi demo.'
-    backendStatus.value = 'offline'
-    inventoryData.value = [
-      { id:1, nama_produk:'Laptop Gaming ASUS ROG', harga:14500000, stok:8 },
-      { id:2, nama_produk:'Monitor LG 27" IPS', harga:4200000, stok:12 },
-      { id:3, nama_produk:'Keyboard Mechanical Keychron', harga:1250000, stok:3 },
-      { id:4, nama_produk:'Mouse Logitech MX Master', harga:850000, stok:0 },
-    ]
+  } catch (err) {
+    inventoryError.value = err.message || 'Tidak dapat terhubung ke backend.'
+    inventoryData.value = []
   } finally { inventoryLoading.value = false }
 }
 
 async function submitProduct() {
   if (!newProd.nama_produk.trim() || newProd.harga <= 0) { showToast('Isi semua field yang valid!', 'error'); return }
-  addingProduct.value = true; setTimeout(() => {
-    inventoryData.value.push({ id: inventoryData.value.length+1, ...newProd })
-    showToast(`Produk "${newProd.nama_produk}" ditambah.`); showAddProduct.value = false; addingProduct.value = false
-  }, 600)
+  addingProduct.value = true;
+  try {
+    const res = await inventoryApi.create(newProd)
+    inventoryData.value.push(res.data)
+    showToast(`Produk "${newProd.nama_produk}" ditambah.`);
+    showAddProduct.value = false;
+    newProd.nama_produk = ''; newProd.harga = 0; newProd.stok = 0; newProd.barcode = '';
+  } catch (err) {
+    showToast(err.message, 'error')
+  } finally {
+    addingProduct.value = false
+  }
 }
 
-function deleteProduct(id) { inventoryData.value = inventoryData.value.filter(i => i.id !== id); showToast('Produk dihapus.') }
+function deleteProduct(id) { 
+  showConfirm(
+    'Hapus Produk',
+    'Apakah Anda yakin ingin menghapus produk ini dari inventaris? Tindakan ini tidak dapat dibatalkan.',
+    async () => {
+      try {
+        await inventoryApi.delete(id)
+        inventoryData.value = inventoryData.value.filter(i => i.id !== id)
+        showToast('Produk dihapus!', 'success')
+      } catch (err) {
+        showToast(err.message, 'error')
+      }
+    }
+  )
+}
+function openEditProduct(item) {
+  Object.assign(editProd, { id: item.id, nama_produk: item.nama_produk, harga: item.harga, stok: item.stok, barcode: item.barcode || '' })
+  showEditProduct.value = true
+}
+async function submitEditProduct() {
+  try {
+    const res = await inventoryApi.update(editProd.id, { nama_produk: editProd.nama_produk, harga: editProd.harga, stok: editProd.stok, barcode: editProd.barcode })
+    const idx = inventoryData.value.findIndex(i => i.id === editProd.id)
+    if (idx >= 0) inventoryData.value[idx] = res.data
+    showEditProduct.value = false
+    showToast('Produk berhasil diperbarui!')
+  } catch (err) { showToast(err.message, 'error') }
+}
+function handleBarcodeScan() {
+  if (!scannedBarcode.value.trim()) return
+  const code = scannedBarcode.value.trim()
+  const item = inventoryData.value.find(i => i.barcode === code)
+  if (item) {
+    addToCart(item)
+    showToast(`Produk ditambahkan via Barcode`, 'success')
+  } else {
+    showToast(`Barcode ${code} tidak dikenali!`, 'error')
+  }
+  scannedBarcode.value = ''
+  if (barcodeInputRef.value) barcodeInputRef.value.focus()
+}
 function addToCart(item) {
   if (item.stok === 0) { showToast('Stok habis!', 'error'); return }
   const ex = cart.value.find(c => c.id === item.id)
@@ -555,18 +919,253 @@ function addToCart(item) {
 }
 function incQty(i) { cart.value[i].qty++ }
 function decQty(i) { if (cart.value[i].qty === 1) cart.value.splice(i,1); else cart.value[i].qty-- }
-function genHash() { return Math.random().toString(16).slice(2,8)+'...'+Math.random().toString(16).slice(2,8) }
-async function checkout() {
-  processing.value = true; await new Promise(r => setTimeout(r, 1000))
-  const txId = 'TRX' + String(transactions.value.length+1).padStart(3,'0'); const h = genHash()
-  const d = new Date().toLocaleDateString('id-ID', {day:'2-digit',month:'short',year:'numeric'})
-  transactions.value.unshift({ id:txId, client:clientName.value, items:cart.value.length+' item', total:grandTotal.value, status:'lunas', contract:true, date:d })
-  contracts.value.unshift({ id:'KTR'+transactions.value.length, title:`Kontrak Pembelian #${txId}`, client:clientName.value, hash:h, date:d })
-  Object.assign(inv, { id:txId, client:clientName.value, date:d, items:[...cart.value], subtotal:subtotal.value, tax:tax.value, total:grandTotal.value, hash:h })
-  cart.value = []; clientName.value = ''; processing.value = false; showInvoice.value = true
+async function fetchTransactions() {
+  try {
+    const res = await transactionApi.getAll()
+    transactions.value = res.data.map(t => ({
+      id: t.kode,
+      client: t.nama_klien,
+      items: t.items.length + ' jenis',
+      total: t.grand_total,
+      status: t.status,
+      contract: true,
+      date: new Date(t.created_at).toLocaleDateString('id-ID', {day:'2-digit',month:'short',year:'numeric'}),
+      _rawId: t.id
+    }))
+  } catch (e) { console.error('Fetch tx error', e) }
 }
-function previewContract() { showToast('Preview PDF terbuka di tab baru.', 'success') }
-onMounted(fetchInventory)
+
+async function fetchContracts() {
+  try {
+    const res = await kontrakApi.getAll()
+    contracts.value = res.data.map(c => ({
+      id: c.kode,
+      title: `Kontrak Pembelian #${c.kode}`,
+      client: c.nama_klien,
+      hash: c.hash_doc && c.hash_doc !== '__pending__' ? c.hash_doc.substring(0, 16) + '...' : 'pending...',
+      date: new Date(c.created_at).toLocaleDateString('id-ID', {day:'2-digit',month:'short',year:'numeric'}),
+      _rawId: c.id
+    }))
+  } catch (e) { console.error('Fetch kontrak error', e) }
+}
+
+async function finalizeCheckout(tx) {
+  await fetchTransactions()
+  await fetchContracts()
+  await fetchInventory()
+
+  const d = new Date(tx.created_at).toLocaleDateString('id-ID', {day:'2-digit',month:'short',year:'numeric'})
+  Object.assign(inv, { id:tx.kode, client:tx.nama_klien, date:d, items:[...cart.value], subtotal:tx.total, tax:tx.ppn, total:tx.grand_total, hash:'(lihat di kontrak)' })
+  
+  cart.value = []; clientName.value = ''; showInvoice.value = true
+  diskonPersen.value = 0; paymentMethod.value = 'tunai'; jumlahBayar.value = 0
+  showToast(`Transaksi ${tx.kode} berhasil!`, 'success')
+  processing.value = false
+}
+
+async function checkout() {
+  if (!clientName.value.trim()) { showToast('Nama Klien belum diisi!', 'error'); return }
+  if (paymentMethod.value === 'tunai' && jumlahBayar.value < grandTotal.value) {
+    showToast('Jumlah bayar kurang dari total!', 'error'); return
+  }
+  processing.value = true;
+  try {
+    const payload = {
+      nama_klien: clientName.value,
+      metode_pembayaran: paymentMethod.value,
+      jumlah_bayar: paymentMethod.value === 'tunai' ? jumlahBayar.value : grandTotal.value,
+      diskon_persen: diskonPersen.value,
+      items: cart.value.map(i => ({ produk_id: i.id, qty: i.qty }))
+    }
+    const res = await transactionApi.create(payload)
+    const tx = res.data
+    
+    if (paymentMethod.value !== 'tunai') {
+      try {
+        const snapRes = await paymentApi.createSnapToken(tx.id)
+        
+        if (snapRes.data.is_demo) {
+          // Jika mode demo (karena keys belum diisi di .env), tampilkan prompt simulasi
+          if (confirm("MODE DEMO: Midtrans belum dikonfigurasi di .env.\n\nSimulasikan pembayaran BERHASIL untuk transaksi ini?")) {
+            await finalizeCheckout(tx)
+          } else {
+            processing.value = false
+            showToast('Pembayaran dibatalkan (Mode Demo)', 'error')
+          }
+          return
+        }
+
+        if (window.snap) {
+          window.snap.pay(snapRes.data.snap_token, {
+            onSuccess: async () => await finalizeCheckout(tx),
+            onPending: async () => { showToast('Pembayaran pending.'); await finalizeCheckout(tx) },
+            onError: () => { showToast('Pembayaran gagal!', 'error'); processing.value = false },
+            onClose: async () => { showToast('Popup ditutup.'); await finalizeCheckout(tx) }
+          })
+          return 
+        } else if (snapRes.data.redirect_url) {
+          window.open(snapRes.data.redirect_url, '_blank')
+        }
+      } catch (err) {
+        showToast('Gagal memanggil Midtrans: ' + err.message, 'error')
+      }
+    }
+    
+    await finalizeCheckout(tx)
+  } catch (err) {
+    showToast(err.message, 'error')
+    processing.value = false
+  }
+}
+
+function previewContract(item) {
+  let kontrakId = item._rawId;
+  if (item.id && item.id.startsWith('TRX')) {
+    showToast('Membuka dokumen...', 'success');
+    fetch(`http://localhost:8000/transaction/${item._rawId}/receipt`, {
+      headers: { 'Authorization': `Bearer ${authState.token}` }
+    }).then(r => r.json()).then(res => {
+      if (res.data && res.data.kontrak) {
+        window.open(`http://localhost:8000/kontrak/${res.data.kontrak.id}/pdf?token=${authState.token}`, '_blank');
+      } else {
+        showToast('Kontrak belum tersedia', 'error');
+      }
+    }).catch(() => showToast('Gagal memuat kontrak', 'error'));
+    return;
+  }
+  window.open(`http://localhost:8000/kontrak/${kontrakId}/pdf?token=${authState.token}`, '_blank');
+}
+
+function downloadContract(item) {
+  let kontrakId = item._rawId;
+  if (item.id && item.id.startsWith('TRX')) {
+    showToast('Mengunduh dokumen...', 'success');
+    fetch(`http://localhost:8000/transaction/${item._rawId}/receipt`, {
+      headers: { 'Authorization': `Bearer ${authState.token}` }
+    }).then(r => r.json()).then(res => {
+      if (res.data && res.data.kontrak) {
+        window.open(`http://localhost:8000/kontrak/${res.data.kontrak.id}/pdf?download=1&token=${authState.token}`, '_blank');
+      } else {
+        showToast('Kontrak belum tersedia', 'error');
+      }
+    }).catch(() => showToast('Gagal memuat kontrak', 'error'));
+    return;
+  }
+  window.open(`http://localhost:8000/kontrak/${kontrakId}/pdf?download=1&token=${authState.token}`, '_blank');
+}
+
+async function handleLogin() {
+  if(!loginForm.username || !loginForm.password) { showToast('Isi username dan password', 'error'); return }
+  loginForm.loading = true
+  try {
+    const res = await fetch('http://localhost:8000/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(loginForm)
+    })
+    const data = await res.json()
+    if(!res.ok) throw new Error(data.detail || 'Login gagal')
+    
+    authState.token = data.access_token
+    authState.user = data.user
+    authState.isAuthenticated = true
+    localStorage.setItem('access_token', data.access_token)
+    localStorage.setItem('user_info', JSON.stringify(data.user))
+    
+    showToast(`Selamat datang, ${data.user.username}!`, 'success')
+    
+    // Set default page based on role
+    if(data.user.role === 'admin' || data.user.role === 'manajer') currentPage.value = 'dashboard'
+    else currentPage.value = 'pos'
+    
+    fetchInventory()
+    fetchTransactions()
+    fetchContracts()
+    fetchSystemStatus()
+  } catch (err) {
+    showToast(err.message, 'error')
+  } finally {
+    loginForm.loading = false
+  }
+}
+
+async function handleRegister() {
+  if(!registerForm.username || !registerForm.password || !registerForm.email) { showToast('Lengkapi form pendaftaran!', 'error'); return }
+  registerForm.loading = true
+  try {
+    const res = await fetch('http://localhost:8000/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(registerForm)
+    })
+    const data = await res.json()
+    if(!res.ok) throw new Error(data.detail || 'Gagal mendaftar')
+    showToast('Registrasi berhasil! Silakan login.', 'success')
+    authView.value = 'login'
+    loginForm.username = registerForm.username
+    loginForm.password = registerForm.password
+  } catch (err) {
+    showToast(err.message, 'error')
+  } finally {
+    registerForm.loading = false
+  }
+}
+
+async function handleForgot() {
+  if(!forgotForm.username || !forgotForm.email || !forgotForm.new_password) { showToast('Lengkapi semua data!', 'error'); return }
+  forgotForm.loading = true
+  try {
+    const res = await fetch('http://localhost:8000/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(forgotForm)
+    })
+    const data = await res.json()
+    if(!res.ok) throw new Error(data.detail || 'Gagal mereset password')
+    showToast(data.message, 'success')
+    authView.value = 'login'
+  } catch (err) {
+    showToast(err.message, 'error')
+  } finally {
+    forgotForm.loading = false
+  }
+}
+
+function handleLogout() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('user_info')
+  authState.isAuthenticated = false
+  authState.user = null
+  authState.token = null
+  authView.value = 'login'
+  showToast('Berhasil logout', 'success')
+}
+
+onMounted(() => {
+  const token = localStorage.getItem('access_token')
+  const userStr = localStorage.getItem('user_info')
+  if (token && userStr) {
+    try {
+      authState.user = JSON.parse(userStr)
+      authState.token = token
+      authState.isAuthenticated = true
+      
+      if(authState.user.role === 'admin' || authState.user.role === 'manajer') {
+        if(currentPage.value === 'pos' && authState.user.role === 'manajer') currentPage.value = 'dashboard'
+      } else {
+        currentPage.value = 'pos'
+      }
+      
+      fetchInventory()
+      fetchTransactions()
+      fetchContracts()
+      fetchSystemStatus()
+      loadPayConfig()
+    } catch {
+      handleLogout()
+    }
+  }
+})
 </script>
 
 <style>
@@ -762,6 +1361,13 @@ input[type=number] {
 .product-icon{color:var(--muted);background:var(--surface3);padding:12px;border-radius:12px}
 .product-name{font-size:14px;font-weight:500;line-height:1.4}
 .product-price{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--c-indigo);font-weight:600}
+
+/* AUTHENTICATION UI */
+.auth-container { position:fixed; inset:0; z-index:999; display:flex; align-items:center; justify-content:center; background:var(--bg); }
+.auth-card { width:100%; max-width:400px; background:rgba(18,18,20,0.8); backdrop-filter:blur(16px); border:1px solid var(--border); border-radius:24px; padding:32px; box-shadow:0 16px 64px rgba(0,0,0,0.5); }
+.auth-header h2 { font-size:24px; font-weight:700; margin-bottom:8px; }
+.auth-form { display:flex; flex-direction:column; gap:4px; }
+.text-indigo { color:var(--c-indigo); }
 .cart-content-wrapper { display:flex; flex-direction:column; flex:1; overflow:hidden; }
 .cart-items-wrapper { flex:1; overflow-y:auto; padding-right:8px; margin-bottom:16px }
 .cart-item{display:flex;align-items:center;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--border)}
@@ -784,6 +1390,7 @@ input[type=number] {
 .c-hash{display:flex;flex-direction:column;align-items:flex-end;font-size:12px;gap:4px;margin-right:24px}
 .c-hash code{color:var(--c-emerald);background:rgba(16,185,129,0.1);padding:2px 6px;border-radius:4px}
 .c-meta{display:flex;flex-direction:column;align-items:flex-end;gap:6px;font-size:13px}
+.c-actions{display:flex;align-items:center;gap:8px;margin-left:16px}
 
 /* MODALS */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:1000}
@@ -811,8 +1418,20 @@ input[type=number] {
 .toast.show{transform:translateY(0);opacity:1}
 .toast.error{border-color:var(--c-rose);color:var(--c-rose)}
 
+/* QRIS DISPLAY */
+.qris-container{display:flex;justify-content:center;margin:16px 0}
+.qris-box{background:var(--surface2);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:240px;box-shadow:0 8px 24px rgba(0,0,0,0.2)}
+.qris-header{text-align:center;display:flex;flex-direction:column;gap:4px}
+.qris-qr{background:#fff;padding:8px;border-radius:12px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.1)}
+.qris-qr img{display:block;width:150px;height:150px;mix-blend-mode:multiply}
+.qris-footer{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px}
+
 /* RESPONSIVENESS */
-@media(max-width:1024px){
+@media(max-width:1024px), (max-height: 700px){
+  html,body{height:auto;min-height:100vh;overflow-y:auto}
+  #app{height:auto;min-height:100vh;overflow-y:visible}
+  .main-content{min-height:100vh;overflow:visible}
+  .page-content{overflow:visible}
   .stats-grid{grid-template-columns:repeat(2,1fr)}
   .dashboard-grid{grid-template-columns:1fr}
   .pos-layout{grid-template-columns:1fr;height:auto;overflow:visible}
