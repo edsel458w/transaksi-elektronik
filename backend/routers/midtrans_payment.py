@@ -284,18 +284,17 @@ async def payment_notification(request: Request, db: Session = Depends(get_db)):
     
     logger.info(f"[Midtrans] Notification: order={order_id}, status={transaction_status}, fraud={fraud_status}")
     
-    # Verify signature
+    # Verify signature — wajib ada dan valid sebelum memproses apapun
     signature_key = body.get("signature_key", "")
     status_code = body.get("status_code", "")
     gross_amount = body.get("gross_amount", "")
     expected_sig = hashlib.sha512(
         f"{order_id}{status_code}{gross_amount}{MIDTRANS_SERVER_KEY}".encode()
     ).hexdigest()
-    
-    if signature_key and signature_key != expected_sig:
-        logger.warning(f"[Midtrans] Invalid signature for order {order_id}")
-        # In production, you might want to uncomment this
-        # raise HTTPException(status_code=403, detail="Invalid signature")
+
+    if not signature_key or signature_key != expected_sig:
+        logger.warning(f"[Midtrans] Invalid/missing signature for order {order_id}")
+        raise HTTPException(status_code=403, detail="Invalid signature")
     
     # Determine payment status
     if transaction_status in ["capture", "settlement"]:
@@ -407,7 +406,9 @@ def simulate_payment_success(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Simulasi callback pembayaran berhasil (untuk testing/demo)."""
+    """Simulasi callback pembayaran berhasil (untuk testing/demo). NONAKTIF di production."""
+    if MIDTRANS_IS_PRODUCTION:
+        raise HTTPException(status_code=404, detail="Not found.")
     payment_log = db.query(PaymentLog).filter(PaymentLog.order_id == payload.order_id).first()
     if not payment_log:
         raise HTTPException(status_code=404, detail="Payment record tidak ditemukan.")
