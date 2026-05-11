@@ -380,7 +380,7 @@ export const deteksiUangApi = {
   },
 
   async getStatus() {
-    const res = await fetch(`${BASE_URL}/deteksi-uang/status`)
+    const res = await apiFetch("/deteksi-uang/status")
     const data = await res.json()
     return data
   },

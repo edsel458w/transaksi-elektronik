@@ -5,6 +5,7 @@ Semua fungsi kriptografi & JWT dikumpulin di sini biar rapi.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import os
+import warnings
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -12,7 +13,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SECRET_KEY                  = os.getenv("JWT_SECRET_KEY", "ganti-ini-sebelum-production-wajib!")
+_DEFAULT_SECRET = "ganti-ini-sebelum-production-wajib!"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEFAULT_SECRET)
+
+if SECRET_KEY == _DEFAULT_SECRET:
+    warnings.warn(
+        "[SECURITY] JWT_SECRET_KEY masih menggunakan nilai default! "
+        "Set JWT_SECRET_KEY di file .env sebelum deploy ke production.",
+        stacklevel=1,
+    )
+
 ALGORITHM                   = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
 REFRESH_TOKEN_EXPIRE_DAYS   = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))

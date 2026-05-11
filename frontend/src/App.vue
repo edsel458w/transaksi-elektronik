@@ -49,6 +49,14 @@
             <label>Password</label>
             <input type="password" v-model="registerForm.password" placeholder="Minimal 8 karakter" />
           </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select v-model="registerForm.role" style="background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:12px 16px; border-radius:10px; outline:none; font-family:'Inter',sans-serif;">
+              <option value="kasir">Kasir</option>
+              <option value="manajer">Manajer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
           <button class="btn-primary full-w mt-2" @click="handleRegister" :disabled="registerForm.loading">
             <component :is="registerForm.loading ? icons.Loader : icons.Plus" size="16" :class="{spin:registerForm.loading}"/>
             {{ registerForm.loading ? 'Memproses...' : 'Daftar' }}

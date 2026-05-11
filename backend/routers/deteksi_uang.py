@@ -4,12 +4,33 @@ Menganalisis gambar uang rupiah dari kamera menggunakan OpenCV
 untuk mendeteksi ciri-ciri keaslian berdasarkan fitur visual.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, Request, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
+from core.deps import get_current_user
+from core.limiter import limiter
 import numpy as np
 import io
 import time
 import math
+
+# Signature bytes (magic numbers) untuk format gambar yang didukung
+_IMAGE_SIGNATURES = [
+    b'\xff\xd8\xff',           # JPEG
+    b'\x89PNG\r\n\x1a\n',     # PNG
+    b'GIF87a',                 # GIF87a
+    b'GIF89a',                 # GIF89a
+    b'RIFF',                   # WebP (dilanjutkan cek WEBP di offset 8)
+    b'BM',                     # BMP
+]
+
+def _is_valid_image_magic(data: bytes) -> bool:
+    """Validasi magic bytes untuk memastikan file benar-benar gambar."""
+    for sig in _IMAGE_SIGNATURES:
+        if data[:len(sig)] == sig:
+            if sig == b'RIFF':
+                return len(data) >= 12 and data[8:12] == b'WEBP'
+            return True
+    return False
 
 try:
     import cv2
@@ -227,7 +248,8 @@ def get_verdict(score: int) -> dict:
 
 
 @router.post("/analisis")
-async def analisis_uang(file: UploadFile = File(...)):
+@limiter.limit("10/minute")
+async def analisis_uang(request: Request, file: UploadFile = File(...), current_user=Depends(get_current_user)):
     """
     Analisis gambar uang untuk mendeteksi keaslian.
     Terima file gambar (JPEG/PNG) dan kembalikan hasil analisis visual.
@@ -254,15 +276,20 @@ async def analisis_uang(file: UploadFile = File(...)):
             "waktu_analisis_ms": random.randint(80, 250),
         })
 
-    # Validate file type
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File harus berupa gambar (JPEG/PNG)")
+    # Validasi MIME type (baris pertama perlindungan)
+    ALLOWED_MIME = {"image/jpeg", "image/png", "image/gif", "image/bmp", "image/webp"}
+    if not file.content_type or file.content_type not in ALLOWED_MIME:
+        raise HTTPException(status_code=400, detail="File harus berupa gambar (JPEG/PNG/GIF/BMP/WebP)")
 
     contents = await file.read()
     if len(contents) < 1000:
         raise HTTPException(status_code=400, detail="File gambar terlalu kecil atau kosong")
     if len(contents) > 20 * 1024 * 1024:  # 20 MB limit
         raise HTTPException(status_code=400, detail="File gambar terlalu besar (maksimal 20MB)")
+
+    # Validasi magic bytes (perlindungan kedua — MIME bisa dipalsukan)
+    if not _is_valid_image_magic(contents):
+        raise HTTPException(status_code=400, detail="File bukan gambar yang valid (header file tidak dikenali)")
 
     start_time = time.time()
 
@@ -294,12 +321,12 @@ async def analisis_uang(file: UploadFile = File(...)):
 
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal menganalisis gambar: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Gagal menganalisis gambar. Pastikan file gambar valid.")
 
 
 @router.get("/status")
-def status_deteksi():
+def status_deteksi(current_user=Depends(get_current_user)):
     """Cek status ketersediaan fitur deteksi uang."""
     return {
         "cv2_available": CV2_AVAILABLE,

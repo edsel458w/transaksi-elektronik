@@ -1,11 +1,5 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from collections import defaultdict
-from datetime import datetime, timezone
-import time
-import os
 from routers import inventory, transaction, auth, kontrak, io_system, deteksi_uang, midtrans_payment, laporan
 
 app = FastAPI(
@@ -59,13 +53,12 @@ class LoginRateLimitMiddleware(BaseHTTPMiddleware):
 app.add_middleware(LoginRateLimitMiddleware)
 
 # CORS - izinkan frontend Vue
-_allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 from database import SessionLocal
@@ -88,7 +81,7 @@ def get_system_status():
     finally:
         try:
             db.close()
-        except:
+        except Exception:
             pass
 
     return {
@@ -104,7 +97,6 @@ def get_system_status():
                 {"name": "Rate Limiting", "ok": True},
                 {"name": "JWT Authentication", "ok": True},
                 {"name": "Input Validation", "ok": True},
-                {"name": "Security Headers", "ok": True},
             ]
         }
     }
@@ -118,4 +110,3 @@ app.include_router(io_system.router)
 app.include_router(deteksi_uang.router)
 app.include_router(midtrans_payment.router)
 app.include_router(laporan.router)
-

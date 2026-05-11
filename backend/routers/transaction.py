@@ -11,9 +11,9 @@ Changelog vs versi sebelumnya:
   - CHANGED: TransaksiResponse schema ditambah ppn & grand_total
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks  # ← CHANGED: tambah BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
 from datetime import datetime
 import hashlib  # ← NEW: untuk SHA-256 hash PDF
@@ -37,8 +37,49 @@ class TransaksiCreate(BaseModel):
     nama_klien: str
     metode_pembayaran: str = "tunai"
     jumlah_bayar: int = 0
-    diskon_persen: int = 0       # diskon 0-100%
+    diskon_persen: int = 0
     items: List[ItemTransaksiCreate]
+
+    @field_validator("nama_klien")
+    @classmethod
+    def nama_klien_valid(cls, v):
+        v = v.strip()
+        if not v or len(v) > 255:
+            raise ValueError("Nama klien harus antara 1–255 karakter.")
+        return v
+
+    @field_validator("diskon_persen")
+    @classmethod
+    def diskon_valid(cls, v):
+        if v < 0 or v > 100:
+            raise ValueError("Diskon harus antara 0 dan 100 persen.")
+        return v
+
+    @field_validator("jumlah_bayar")
+    @classmethod
+    def jumlah_bayar_valid(cls, v):
+        if v < 0:
+            raise ValueError("Jumlah bayar tidak boleh negatif.")
+        if v > 1_000_000_000:
+            raise ValueError("Jumlah bayar terlalu besar.")
+        return v
+
+    @field_validator("metode_pembayaran")
+    @classmethod
+    def metode_valid(cls, v):
+        allowed = {"tunai", "debit", "e-wallet", "qris", "midtrans"}
+        if v not in allowed:
+            raise ValueError(f"Metode pembayaran tidak valid. Pilihan: {', '.join(allowed)}.")
+        return v
+
+    @field_validator("items")
+    @classmethod
+    def items_not_empty(cls, v):
+        if not v:
+            raise ValueError("Transaksi harus memiliki minimal 1 item.")
+        if len(v) > 100:
+            raise ValueError("Terlalu banyak item dalam satu transaksi (maksimal 100).")
+        return v
 
 class ItemTransaksiResponse(BaseModel):
     id: int
@@ -547,11 +588,11 @@ def create_transaction(
         db.rollback()  # ← CHANGED: rollback jika ada HTTPException (stok kurang, dll)
         raise          # re-raise agar FastAPI tetap kembalikan error response yang benar
     except Exception as e:
-        db.rollback()  # ← CHANGED: rollback untuk error tak terduga
+        db.rollback()
         logger.error(f"[TRX] Gagal buat transaksi: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Terjadi kesalahan server saat memproses transaksi: {str(e)}"
+            detail="Terjadi kesalahan internal server. Silakan coba lagi atau hubungi admin."
         )
 
     # ── NEW: Trigger background task untuk generate PDF + Kontrak ──

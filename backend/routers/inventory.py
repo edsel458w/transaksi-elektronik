@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 from database import get_db
@@ -15,6 +15,30 @@ class ProdukCreate(BaseModel):
     kategori: str = "Umum"
     harga: int
     stok: int
+
+    @field_validator("nama_produk")
+    @classmethod
+    def nama_valid(cls, v):
+        v = v.strip()
+        if not v or len(v) > 255:
+            raise ValueError("Nama produk harus antara 1–255 karakter.")
+        return v
+
+    @field_validator("harga")
+    @classmethod
+    def harga_valid(cls, v):
+        if v < 0:
+            raise ValueError("Harga tidak boleh negatif.")
+        if v > 1_000_000_000:
+            raise ValueError("Harga terlalu besar.")
+        return v
+
+    @field_validator("stok")
+    @classmethod
+    def stok_valid(cls, v):
+        if v < 0:
+            raise ValueError("Stok tidak boleh negatif.")
+        return v
 
 class ProdukUpdate(BaseModel):
     nama_produk: Optional[str] = None

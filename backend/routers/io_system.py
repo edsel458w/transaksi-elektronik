@@ -167,15 +167,25 @@ def get_io_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Ambil semua log I/O nyata dari database."""
-    query = db.query(IOLog).order_by(desc(IOLog.timestamp))
-    
-    if action:
-        query = query.filter(IOLog.action == action.upper())
-    
-    if limit:
-        query = query.limit(limit)
+    """Ambil log I/O dari database. Admin/manajer bisa lihat semua; kasir hanya melihat log milik sendiri."""
+    from models import RoleEnum
 
+    MAX_LIMIT = 1000
+    limit = max(1, min(limit, MAX_LIMIT))
+
+    ALLOWED_ACTIONS = {"INPUT", "PROCESS", "OUTPUT", "ERROR"}
+    query = db.query(IOLog).order_by(desc(IOLog.timestamp))
+
+    if action:
+        action_upper = action.upper()
+        if action_upper not in ALLOWED_ACTIONS:
+            raise HTTPException(status_code=400, detail=f"Action tidak valid. Pilihan: {', '.join(ALLOWED_ACTIONS)}.")
+        query = query.filter(IOLog.action == action_upper)
+
+    if current_user.role == RoleEnum.kasir:
+        query = query.filter(IOLog.user_id == current_user.id)
+
+    query = query.limit(limit)
     logs = query.all()
 
     return {
@@ -611,13 +621,16 @@ def delete_manual_log(
     return {"status": "success", "message": f"Log #{log_id} berhasil dihapus."}
 
 
-# ── DELETE /io/logs/manual — Hapus semua manual log ──────────
+# ── DELETE /io/logs/manual — Hapus semua manual log (admin only) ──────────
 @router.delete("/logs/manual")
 def clear_manual_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Hapus semua manual log dari database."""
+    """Hapus semua manual log dari database. Hanya admin."""
+    from models import RoleEnum
+    if current_user.role != RoleEnum.admin:
+        raise HTTPException(status_code=403, detail="Hanya admin yang bisa menghapus semua log.")
     count = db.query(IOLog).filter(IOLog.is_manual == True).delete()
     db.commit()
     return {"status": "success", "message": f"{count} log berhasil dihapus."}

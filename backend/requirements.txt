@@ -74,3 +74,7 @@ opencv-python==4.10.0.84
 
 # HTTP Client (untuk Midtrans API)
 httpx==0.28.1
+
+# Rate Limiting
+slowapi==0.1.9
+limits==3.6.0
