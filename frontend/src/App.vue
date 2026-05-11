@@ -183,7 +183,7 @@
                 <div
                   v-for="n in notifications" :key="n.id"
                   class="notif-item"
-                  :class="[n.type, { unread: !dismissedIds.includes(n.id) }]"
+                  :class="[n.type, { unread: !readStatus[n.id] }]"
                   @click="goToNotifPage(n.page)"
                 >
                   <div class="notif-icon-wrap" :class="n.type">
@@ -224,7 +224,7 @@
               <table class="data-table">
                 <thead><tr><th>ID</th><th>Klien</th><th>Total</th><th>Status</th><th>Tanggal</th></tr></thead>
                 <tbody>
-                  <tr v-for="tx in transactions.slice(0,5)" :key="tx.id">
+                  <tr v-for="tx in filteredTx.slice(0,5)" :key="tx.id">
                     <td class="mono">#{{ tx.id }}</td>
                     <td>{{ tx.client }}</td>
                     <td class="mono bold">{{ formatRp(tx.total) }}</td>
@@ -716,7 +716,8 @@ const sidebarCollapsed = ref(false)
 const searchQuery = ref('')
 watch(currentPage, () => { searchQuery.value = '' })
 const showNotifPanel = ref(false)
-const dismissedIds = ref([])
+const dismissedIds = ref([]) // Keep for backward compatibility if needed, but we'll use readStatus
+const readStatus = reactive({})
 const backendStatus = ref('offline')
 
 const inventoryData = ref([])
@@ -790,12 +791,32 @@ const pagesMeta = {
 
 const currentPageMeta = computed(() => pagesMeta[currentPage.value])
 
-const dashboardStats = computed(() => [
-  { label: 'Total Transaksi', value: transactions.value.length, icon: icons.ArrowRightLeft, trend: 12, color: 'var(--c-indigo)' },
-  { label: 'Pendapatan', value: formatRp(transactions.value.reduce((a,b)=>a+b.total,0)), icon: icons.ShoppingCart, trend: 8, color: 'var(--c-emerald)' },
-  { label: 'Produk Aktif', value: inventoryData.value.length, icon: icons.Package, trend: 3, color: 'var(--c-amber)' },
-  { label: 'Kontrak Dibuat', value: contracts.value.length, icon: icons.ShieldCheck, trend: 5, color: 'var(--c-purple)' },
-])
+const dashboardStats = computed(() => {
+  const txs = transactions.value.filter(t => {
+    if (!searchQuery.value) return true
+    const q = searchQuery.value.toLowerCase()
+    return t.id.toLowerCase().includes(q) || t.client.toLowerCase().includes(q) || String(t.total).includes(q)
+  })
+  
+  const inv = inventoryData.value.filter(i => {
+    if (!searchQuery.value) return true
+    const q = searchQuery.value.toLowerCase()
+    return i.nama_produk.toLowerCase().includes(q) || (i.barcode && i.barcode.toLowerCase().includes(q))
+  })
+  
+  const ctr = contracts.value.filter(c => {
+    if (!searchQuery.value) return true
+    const q = searchQuery.value.toLowerCase()
+    return c.id.toLowerCase().includes(q) || c.client.toLowerCase().includes(q) || c.hash.toLowerCase().includes(q)
+  })
+
+  return [
+    { label: 'Total Transaksi', value: txs.length, icon: icons.ArrowRightLeft, trend: 12, color: 'var(--c-indigo)' },
+    { label: 'Pendapatan', value: formatRp(txs.reduce((a,b)=>a+b.total,0)), icon: icons.ShoppingCart, trend: 8, color: 'var(--c-emerald)' },
+    { label: 'Produk Aktif', value: inv.length, icon: icons.Package, trend: 3, color: 'var(--c-amber)' },
+    { label: 'Kontrak Dibuat', value: ctr.length, icon: icons.ShieldCheck, trend: 5, color: 'var(--c-purple)' },
+  ]
+})
 
 const systemStatus = ref([])
 const secChecks = ref([])
@@ -881,10 +902,14 @@ const notifications = computed(() => {
   return items
 })
 
-const unreadNotifCount = computed(() => notifications.value.filter(n => !dismissedIds.value.includes(n.id)).length)
+const unreadNotifCount = computed(() => notifications.value.filter(n => !readStatus[n.id]).length)
 
 function toggleNotifPanel() { showNotifPanel.value = !showNotifPanel.value }
-function markAllRead() { dismissedIds.value = notifications.value.map(n => n.id) }
+function markAllRead() { 
+  notifications.value.forEach(n => {
+    readStatus[n.id] = true
+  })
+}
 function goToNotifPage(page) { currentPage.value = page; showNotifPanel.value = false }
 
 const subtotal = computed(() => cart.value.reduce((s,i) => s + i.harga * i.qty, 0))
