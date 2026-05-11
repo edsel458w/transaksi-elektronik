@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 from core.deps import get_current_user
 from core.limiter import limiter
 import numpy as np
-import io
 import time
 import math
 
@@ -46,6 +45,8 @@ def analyze_money_image(img_array: np.ndarray) -> dict:
     Analisis gambar uang dengan berbagai teknik computer vision.
     Mengembalikan skor dan detail tiap indikator keaslian.
     """
+    if not CV2_AVAILABLE:
+        raise RuntimeError("OpenCV (cv2) tidak tersedia")
     results = {}
     scores = []
 
@@ -193,7 +194,7 @@ def analyze_money_image(img_array: np.ndarray) -> dict:
 
     # ── HITUNG SKOR KESELURUHAN ────────────────────────────────────────────────
     weights = [1.5, 2.0, 1.5, 0.8, 1.2, 1.0]  # ketajaman paling penting
-    weighted_sum = sum(s * w for s, w in zip(scores, weights))
+    weighted_sum = sum(s * wt for s, wt in zip(scores, weights))
     weight_total = sum(weights)
     overall_score = int(weighted_sum / weight_total)
 

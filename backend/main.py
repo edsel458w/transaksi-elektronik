@@ -1,6 +1,17 @@
+import os
+import time
+from collections import defaultdict
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from dotenv import load_dotenv
 from routers import inventory, transaction, auth, kontrak, io_system, deteksi_uang, midtrans_payment, laporan
+
+load_dotenv()
+
+_allowed_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
 
 app = FastAPI(
     title="SecureTransact API",
