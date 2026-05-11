@@ -168,10 +168,35 @@
               v-model="searchQuery"
             />
           </div>
-          <button class="notif-btn" type="button" aria-label="Notifikasi">
-            <component :is="icons.Bell" size="18" />
-            <span class="notif-dot"></span>
-          </button>
+          <div class="notif-wrapper">
+            <button class="notif-btn" type="button" aria-label="Notifikasi" @click.stop="toggleNotifPanel">
+              <component :is="icons.Bell" size="18" />
+              <span class="notif-badge" v-if="unreadNotifCount > 0">{{ unreadNotifCount > 9 ? '9+' : unreadNotifCount }}</span>
+            </button>
+            <div class="notif-panel fade-in" v-if="showNotifPanel" @click.stop>
+              <div class="notif-panel-header">
+                <span class="notif-panel-title">Notifikasi</span>
+                <button class="btn-link" @click="markAllRead" v-if="unreadNotifCount > 0">Tandai Dibaca</button>
+              </div>
+              <div v-if="notifications.length === 0" class="notif-empty">Tidak ada notifikasi baru</div>
+              <div class="notif-list" v-else>
+                <div
+                  v-for="n in notifications" :key="n.id"
+                  class="notif-item"
+                  :class="[n.type, { unread: !dismissedIds.includes(n.id) }]"
+                  @click="goToNotifPage(n.page)"
+                >
+                  <div class="notif-icon-wrap" :class="n.type">
+                    <component :is="n.type === 'warning' ? icons.AlertTriangle : n.type === 'error' ? icons.AlertOctagon : icons.AlertCircle" size="15" />
+                  </div>
+                  <div class="notif-body">
+                    <strong class="notif-title">{{ n.title }}</strong>
+                    <span class="notif-msg">{{ n.message }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -279,7 +304,7 @@
                   <span class="muted">Klik untuk tambah</span>
                 </div>
                 <div class="product-grid">
-                  <div v-for="item in inventoryData" :key="item.id" class="product-card"
+                  <div v-for="item in filteredInventory" :key="item.id" class="product-card"
                     :class="{'out-of-stock': item.stok === 0}" @click="addToCart(item)">
                     <div class="product-icon"><component :is="icons.Package" size="24" /></div>
                     <div class="product-name">{{ item.nama_produk }}</div>
@@ -467,6 +492,9 @@
       </div>
     </main>
 
+    <!-- NOTIF OVERLAY -->
+    <div v-if="showNotifPanel" class="notif-overlay" @click="showNotifPanel = false"></div>
+
     <!-- TOAST -->
     <div class="toast" :class="[{show: toast.show}, toast.type]">
       <component :is="toast.type==='error'?icons.AlertCircle:icons.CheckCircle" size="16"/>
@@ -607,7 +635,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive, markRaw } from 'vue'
+import { ref, computed, onMounted, reactive, markRaw, watch } from 'vue'
 import {
   LayoutDashboard, Box, ShoppingCart, ArrowRightLeft, FileCheck, Search, Bell,
   ChevronLeft, ChevronRight, Server, ServerOff, TrendingUp, ArrowRight,
@@ -686,6 +714,9 @@ const permittedNavAdvanced = computed(() => {
 const currentPage = ref('pos')
 const sidebarCollapsed = ref(false)
 const searchQuery = ref('')
+watch(currentPage, () => { searchQuery.value = '' })
+const showNotifPanel = ref(false)
+const dismissedIds = ref([])
 const backendStatus = ref('offline')
 
 const inventoryData = ref([])
@@ -828,12 +859,33 @@ const filteredTx = computed(() => {
 const filteredContracts = computed(() => {
   if (!searchQuery.value) return contracts.value
   const q = searchQuery.value.toLowerCase()
-  return contracts.value.filter(c => 
-    c.id.toLowerCase().includes(q) || 
-    c.client.toLowerCase().includes(q) || 
+  return contracts.value.filter(c =>
+    c.id.toLowerCase().includes(q) ||
+    c.client.toLowerCase().includes(q) ||
     c.hash.toLowerCase().includes(q)
   )
 })
+
+const notifications = computed(() => {
+  const items = []
+  if (backendStatus.value === 'offline') {
+    items.push({ id: 'backend-offline', type: 'error', title: 'Backend Offline', message: 'Server tidak dapat dijangkau', page: 'dashboard' })
+  }
+  inventoryData.value.filter(i => i.stok < 5).forEach(i => {
+    items.push({ id: `stock-${i.id}`, type: 'warning', title: 'Stok Menipis', message: `${i.nama_produk} — sisa ${i.stok} unit`, page: 'inventory' })
+  })
+  const pending = transactions.value.filter(t => t.status === 'menunggu')
+  if (pending.length > 0) {
+    items.push({ id: 'pending-payments', type: 'info', title: 'Menunggu Pembayaran', message: `${pending.length} transaksi belum diselesaikan`, page: 'transaksi' })
+  }
+  return items
+})
+
+const unreadNotifCount = computed(() => notifications.value.filter(n => !dismissedIds.value.includes(n.id)).length)
+
+function toggleNotifPanel() { showNotifPanel.value = !showNotifPanel.value }
+function markAllRead() { dismissedIds.value = notifications.value.map(n => n.id) }
+function goToNotifPage(page) { currentPage.value = page; showNotifPanel.value = false }
 
 const subtotal = computed(() => cart.value.reduce((s,i) => s + i.harga * i.qty, 0))
 const diskonNominal = computed(() => Math.round(subtotal.value * diskonPersen.value / 100))
@@ -1327,9 +1379,27 @@ h1,h2,h3{font-family:'Outfit',sans-serif;letter-spacing:-0.02em}
 .search-icon{position:absolute;left:12px;color:var(--muted)}
 .search-bar input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 16px 10px 36px;border-radius:var(--r-btn);font-size:14px;width:260px;font-family:'Inter',sans-serif;outline:none;transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1);box-shadow:inset 0 2px 4px rgba(0,0,0,0.2)}
 .search-bar input:focus{border-color:var(--c-indigo);box-shadow:0 0 0 3px rgba(99,102,241,0.15);width:300px}
+.notif-wrapper{position:relative}
 .notif-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);width:40px;height:40px;border-radius:var(--r-btn);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;transition:0.2s}
 .notif-btn:hover{background:var(--surface3);border-color:var(--border-hover)}
-.notif-dot{width:8px;height:8px;background:var(--c-rose);border-radius:50%;position:absolute;top:10px;right:10px;box-shadow:0 0 8px rgba(244,63,94,0.6)}
+.notif-badge{min-width:17px;height:17px;background:var(--c-rose);color:#fff;border-radius:999px;font-size:10px;font-weight:700;position:absolute;top:6px;right:6px;display:flex;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 0 6px rgba(244,63,94,0.5);line-height:1;pointer-events:none}
+.notif-panel{position:absolute;top:calc(100% + 12px);right:0;width:320px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:0 16px 40px rgba(0,0,0,0.5);z-index:200;overflow:hidden}
+.notif-panel-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+.notif-panel-title{font-size:14px;font-weight:600}
+.notif-empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px}
+.notif-list{max-height:320px;overflow-y:auto}
+.notif-item{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.04);transition:background 0.15s}
+.notif-item:last-child{border-bottom:none}
+.notif-item:hover{background:var(--surface3)}
+.notif-item.unread{background:rgba(99,102,241,0.04)}
+.notif-icon-wrap{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.notif-icon-wrap.warning{background:rgba(245,158,11,0.15);color:var(--c-amber)}
+.notif-icon-wrap.info{background:rgba(99,102,241,0.15);color:var(--c-indigo)}
+.notif-icon-wrap.error{background:rgba(244,63,94,0.15);color:var(--c-rose)}
+.notif-body{flex:1;min-width:0;padding-top:2px}
+.notif-title{display:block;font-size:13px;font-weight:600;margin-bottom:2px}
+.notif-msg{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notif-overlay{position:fixed;inset:0;z-index:15;background:transparent}
 
 .page-content{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column}
 /* Full size flex wrapper for specific pages */
