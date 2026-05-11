@@ -160,10 +160,19 @@ async function fetchData() {
   finally { loading.value = false }
 }
 
-function exportCsv() {
-  const url = laporanApi.getExportCsvUrl(periode.value)
-  window.open(url, '_blank')
-  showToast('Mengunduh laporan CSV...')
+async function exportCsv() {
+  try {
+    showToast('Mengunduh laporan CSV...')
+    const blob = await laporanApi.downloadCsv(periode.value)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `laporan_${periode.value}_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) { showToast('Gagal mengunduh CSV: ' + e.message, 'error') }
 }
 
 onMounted(fetchData)

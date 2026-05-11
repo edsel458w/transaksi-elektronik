@@ -500,6 +500,9 @@ def create_transaction(
             kembalian = 0
 
         # Simpan transaksi
+        # Jika tunai langsung lunas, jika midtrans/lainnya menunggu pembayaran
+        initial_status = "lunas" if payload.metode_pembayaran == "tunai" else "menunggu"
+        
         transaksi = Transaksi(
             kode="__pending__",
             nama_klien=payload.nama_klien,
@@ -508,7 +511,7 @@ def create_transaction(
             diskon_nominal=diskon_nominal,
             ppn=ppn,
             grand_total=grand_total,
-            status="lunas",
+            status=initial_status,
             metode_pembayaran=payload.metode_pembayaran,
             jumlah_bayar=payload.jumlah_bayar,
             kembalian=kembalian,

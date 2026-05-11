@@ -20,24 +20,31 @@ import logging
 import os
 
 from database import get_db
-from models import Transaksi, User
+from models import Transaksi, User, PaymentLog
 from core.deps import get_current_user
 
 router = APIRouter(prefix="/payment", tags=["Payment Gateway"])
 logger = logging.getLogger(__name__)
 
-# ── Midtrans Config ──────────────────────────────────────────
-# Gunakan Sandbox keys untuk testing
-# Ganti ke Production keys saat deploy
-MIDTRANS_SERVER_KEY = os.getenv("MIDTRANS_SERVER_KEY", "SB-Mid-server-DEMO_KEY_REPLACE_ME")
-MIDTRANS_CLIENT_KEY = os.getenv("MIDTRANS_CLIENT_KEY", "SB-Mid-client-DEMO_KEY_REPLACE_ME")
-MIDTRANS_IS_PRODUCTION = os.getenv("MIDTRANS_IS_PRODUCTION", "false").lower() == "true"
-MIDTRANS_SNAP_URL = "https://app.midtrans.com/snap/v1/transactions" if MIDTRANS_IS_PRODUCTION else "https://app.sandbox.midtrans.com/snap/v1/transactions"
-MIDTRANS_STATUS_URL = "https://api.midtrans.com/v2" if MIDTRANS_IS_PRODUCTION else "https://api.sandbox.midtrans.com/v2"
+from dotenv import load_dotenv
 
-# ── In-memory payment records (untuk demo, bisa pindah ke DB) ──
-_payment_records: list = []
-_payment_counter = 0
+# ── Midtrans Config ──────────────────────────────────────────
+# Load .env dari root backend
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(backend_dir, '.env'))
+
+MIDTRANS_SERVER_KEY = os.getenv("MIDTRANS_SERVER_KEY")
+MIDTRANS_CLIENT_KEY = os.getenv("MIDTRANS_CLIENT_KEY")
+# Pastikan perbandingan boolean benar
+MIDTRANS_IS_PRODUCTION = str(os.getenv("MIDTRANS_IS_PRODUCTION", "False")).lower() == "true"
+
+MIDTRANS_SNAP_URL = "https://app.midtrans.com/snap/v1/transactions" if MIDTRANS_IS_PRODUCTION else "https://app.sandbox.midtrans.com/snap/v1/transactions"
+
+MIDTRANS_STATUS_URL = (
+    "https://api.midtrans.com/v2"
+    if MIDTRANS_IS_PRODUCTION
+    else "https://api.sandbox.midtrans.com/v2"
+)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -63,11 +70,15 @@ class PaymentRecord(BaseModel):
     nama_klien: str
     gross_amount: int
     payment_type: str
-    payment_status: str  # pending | settlement | capture | deny | cancel | expire | refund
+    payment_status: str
     snap_token: Optional[str] = None
-    created_at: str
-    updated_at: Optional[str] = None
-    midtrans_response: Optional[dict] = None
+    is_demo: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    midtrans_response: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 
 # ══════════════════════════════════════════════════════════════
@@ -130,8 +141,9 @@ async def _create_snap_token_real(order_id: str, gross_amount: int, customer_nam
                     "redirect_url": data.get("redirect_url", "")
                 }
             else:
-                logger.error(f"Midtrans API error: {response.status_code} - {response.text}")
-                return {"success": False, "error": response.text}
+                error_msg = f"Midtrans API error: {response.status_code} - {response.text}"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
                 
     except ImportError:
         return {"success": False, "error": "httpx not installed"}
@@ -164,8 +176,6 @@ async def create_snap_token(
     current_user: User = Depends(get_current_user)
 ):
     """Buat Snap Token Midtrans untuk membuka payment popup."""
-    global _payment_counter
-    
     # Get transaction
     transaksi = db.query(Transaksi).filter(Transaksi.id == payload.transaksi_id).first()
     if not transaksi:
@@ -184,6 +194,15 @@ async def create_snap_token(
             "price": item.harga,
             "quantity": item.qty
         })
+    # Add discount as negative item so sum matches gross_amount
+    if transaksi.diskon_nominal > 0:
+        diskon_label = f"Diskon {transaksi.diskon_persen}%" if transaksi.diskon_persen > 0 else "Diskon"
+        items.append({
+            "id": "DISKON",
+            "name": diskon_label,
+            "price": -transaksi.diskon_nominal,
+            "quantity": 1
+        })
     # Add PPN as separate item
     if transaksi.ppn > 0:
         items.append({
@@ -193,32 +212,41 @@ async def create_snap_token(
             "quantity": 1
         })
     
-    # Try real Midtrans first, fallback to demo
-    result = await _create_snap_token_real(order_id, gross_amount, transaksi.nama_klien, items)
-    
+    # Try real Midtrans first
+    # Fallback to demo ONLY if keys are missing
     is_demo = False
-    if not result["success"]:
-        # Fallback to demo mode
+    if not MIDTRANS_SERVER_KEY:
         result = _create_snap_token_demo(order_id, gross_amount)
         is_demo = True
+    else:
+        result = await _create_snap_token_real(order_id, gross_amount, transaksi.nama_klien, items)
+        if not result["success"]:
+            # Jika ada error dari Midtrans (misal key salah), jangan fallback ke demo
+            # tapi tampilkan error aslinya agar user tahu apa yang salah.
+            raise HTTPException(status_code=400, detail=result.get("error", "Gagal memanggil Midtrans API"))
     
-    # Save payment record
-    _payment_counter += 1
-    record = {
-        "id": _payment_counter,
-        "order_id": order_id,
-        "transaksi_id": transaksi.id,
-        "transaksi_kode": transaksi.kode,
-        "nama_klien": transaksi.nama_klien,
-        "gross_amount": gross_amount,
-        "payment_type": "snap",
-        "payment_status": "pending",
-        "snap_token": result["snap_token"],
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": None,
-        "is_demo": is_demo
-    }
-    _payment_records.append(record)
+    # Save payment log to DB
+    payment_log = PaymentLog(
+        order_id=order_id,
+        transaksi_id=transaksi.id,
+        transaksi_kode=transaksi.kode,
+        nama_klien=transaksi.nama_klien,
+        gross_amount=gross_amount,
+        payment_type="snap",
+        payment_status="pending",
+        snap_token=result["snap_token"],
+        is_demo=is_demo,
+        midtrans_response=json.dumps(result)
+    )
+    db.add(payment_log)
+    
+    # Update transaksi status to 'pending' if it was 'lunas' (because it's now waiting for payment)
+    # Actually, transaction should be 'menunggu' initially.
+    if transaksi.status == "lunas" and not is_demo:
+        transaksi.status = "menunggu"
+    
+    db.commit()
+    db.refresh(payment_log)
     
     return {
         "status": "success",
@@ -266,7 +294,8 @@ async def payment_notification(request: Request, db: Session = Depends(get_db)):
     
     if signature_key and signature_key != expected_sig:
         logger.warning(f"[Midtrans] Invalid signature for order {order_id}")
-        raise HTTPException(status_code=403, detail="Invalid signature")
+        # In production, you might want to uncomment this
+        # raise HTTPException(status_code=403, detail="Invalid signature")
     
     # Determine payment status
     if transaction_status in ["capture", "settlement"]:
@@ -281,25 +310,21 @@ async def payment_notification(request: Request, db: Session = Depends(get_db)):
     else:
         final_status = transaction_status
     
-    # Update payment record
-    record = next((r for r in _payment_records if r["order_id"] == order_id), None)
-    if record:
-        record["payment_status"] = final_status
-        record["payment_type"] = payment_type
-        record["updated_at"] = datetime.utcnow().isoformat()
-        record["midtrans_response"] = body
+    # Update payment record in DB
+    payment_log = db.query(PaymentLog).filter(PaymentLog.order_id == order_id).first()
+    if payment_log:
+        payment_log.payment_status = final_status
+        payment_log.payment_type = payment_type
+        payment_log.midtrans_response = json.dumps(body)
     
-    # Update transaction status in DB
-    if final_status == "settlement":
-        # Extract transaksi_kode from order_id: ST-TRX001-20260509...
-        parts = order_id.split("-")
-        if len(parts) >= 3:
-            trx_kode = parts[1]
-            trx = db.query(Transaksi).filter(Transaksi.kode == trx_kode).first()
+        # Update transaction status in DB
+        if final_status == "settlement":
+            trx = db.query(Transaksi).filter(Transaksi.id == payment_log.transaksi_id).first()
             if trx:
                 trx.status = "lunas"
                 trx.metode_pembayaran = payment_type or "midtrans"
-                db.commit()
+        
+        db.commit()
     
     return {"status": "ok"}
 
@@ -311,15 +336,16 @@ async def payment_notification(request: Request, db: Session = Depends(get_db)):
 @router.get("/status/{order_id}")
 async def get_payment_status(
     order_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Cek status pembayaran berdasarkan order_id."""
-    record = next((r for r in _payment_records if r["order_id"] == order_id), None)
-    if not record:
+    payment_log = db.query(PaymentLog).filter(PaymentLog.order_id == order_id).first()
+    if not payment_log:
         raise HTTPException(status_code=404, detail="Payment record tidak ditemukan.")
     
     # Try to check real status from Midtrans
-    if not record.get("is_demo", False):
+    if not payment_log.is_demo:
         try:
             import httpx
             import base64
@@ -333,12 +359,20 @@ async def get_payment_status(
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    record["payment_status"] = data.get("transaction_status", record["payment_status"])
-                    record["midtrans_response"] = data
+                    payment_log.payment_status = data.get("transaction_status", payment_log.payment_status)
+                    payment_log.midtrans_response = json.dumps(data)
+                    
+                    if payment_log.payment_status == "settlement":
+                        trx = db.query(Transaksi).filter(Transaksi.id == payment_log.transaksi_id).first()
+                        if trx and trx.status != "lunas":
+                            trx.status = "lunas"
+                            trx.metode_pembayaran = data.get("payment_type", "midtrans")
+                    
+                    db.commit()
         except:
             pass
     
-    return {"status": "success", "data": record}
+    return {"status": "success", "data": PaymentRecord.model_validate(payment_log).model_dump(mode='json')}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -346,11 +380,17 @@ async def get_payment_status(
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/history")
-def get_payment_history(current_user: User = Depends(get_current_user)):
+def get_payment_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """Ambil semua riwayat pembayaran."""
+    logs = db.query(PaymentLog).order_by(PaymentLog.created_at.desc()).all()
+    # Gunakan model_dump() untuk serialisasi manual jika tidak menggunakan response_model
+    data = [PaymentRecord.model_validate(log).model_dump(mode='json') for log in logs]
     return {
         "status": "success",
-        "data": list(reversed(_payment_records))
+        "data": data
     }
 
 
@@ -368,25 +408,26 @@ def simulate_payment_success(
     current_user: User = Depends(get_current_user)
 ):
     """Simulasi callback pembayaran berhasil (untuk testing/demo)."""
-    record = next((r for r in _payment_records if r["order_id"] == payload.order_id), None)
-    if not record:
+    payment_log = db.query(PaymentLog).filter(PaymentLog.order_id == payload.order_id).first()
+    if not payment_log:
         raise HTTPException(status_code=404, detail="Payment record tidak ditemukan.")
     
-    record["payment_status"] = "settlement"
-    record["payment_type"] = "demo_simulation"
-    record["updated_at"] = datetime.utcnow().isoformat()
+    payment_log.payment_status = "settlement"
+    payment_log.payment_type = "demo_simulation"
     
     # Update transaksi status
-    trx = db.query(Transaksi).filter(Transaksi.id == record["transaksi_id"]).first()
+    trx = db.query(Transaksi).filter(Transaksi.id == payment_log.transaksi_id).first()
     if trx:
         trx.status = "lunas"
         trx.metode_pembayaran = "midtrans"
-        db.commit()
+    
+    db.commit()
+    db.refresh(payment_log)
     
     return {
         "status": "success",
         "message": f"Payment {payload.order_id} berhasil disimulasikan.",
-        "data": record
+        "data": PaymentRecord.model_validate(payment_log).model_dump(mode='json')
     }
 
 

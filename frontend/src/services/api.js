@@ -440,7 +440,16 @@ export const laporanApi = {
   },
 
   getExportCsvUrl(periode = 'bulan') {
-    const token = getAccessToken()
     return `${BASE_URL}/laporan/export/csv?periode=${periode}`
+  },
+
+  async downloadCsv(periode = 'bulan') {
+    const res = await apiFetch(`/laporan/export/csv?periode=${periode}`)
+    if (!res.ok) {
+      let msg = 'Gagal export CSV.'
+      try { const d = await res.json(); if (d.detail) msg = d.detail } catch {}
+      throw new Error(msg)
+    }
+    return await res.blob()
   },
 }

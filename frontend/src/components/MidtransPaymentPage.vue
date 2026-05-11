@@ -51,8 +51,14 @@
                 <span class="muted">{{ formatDate(ph.created_at) }}</span>
               </div>
               <div class="ph-actions" v-if="ph.payment_status === 'pending'">
-                <button class="btn-sim-sm" @click="simulateById(ph.order_id)">
-                  <CheckCircle :size="12" /> Simulasi Bayar
+                <button class="btn-check-sm" @click="checkStatus(ph.order_id)" :disabled="checkingIds.has(ph.order_id)">
+                  <RefreshCw :size="12" :class="{spin: checkingIds.has(ph.order_id)}" /> Cek Status
+                </button>
+                <button v-if="!ph.is_demo" class="btn-pay-now-sm" @click="openSnapPopup(ph)" :disabled="payingIds.has(ph.order_id)">
+                  <CreditCard :size="12" :class="{spin: payingIds.has(ph.order_id)}" /> Bayar Sekarang
+                </button>
+                <button v-if="ph.is_demo || !payConfig.is_production" class="btn-sim-sm" @click="simulateById(ph.order_id)">
+                  <Zap :size="12" /> Simulasi Lunas
                 </button>
               </div>
             </div>
@@ -78,17 +84,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { transactionApi, paymentApi } from '../services/api.js'
+import { ref, onMounted } from 'vue'
+import { paymentApi } from '../services/api.js'
 import {
-  CreditCard, CheckCircle, Loader, Zap, AlertTriangle, ExternalLink, History,
-  RefreshCw, Wallet, Shield, Landmark, Smartphone, QrCode, Store, Globe, Building2
+  CreditCard, CheckCircle, Loader, Zap, History,
+  RefreshCw, Wallet, Shield, Landmark, Smartphone, QrCode, Store
 } from 'lucide-vue-next'
 
 const configLoaded = ref(false)
 const payConfig = ref({ is_production: false, client_key: '', snap_url: '' })
 const paymentHistory = ref([])
 const historyLoading = ref(false)
+const checkingIds = ref(new Set())
+const payingIds = ref(new Set())
 
 const channels = [
   { name:'Bank Transfer', desc:'BCA, BNI, BRI, Mandiri VA', icon:Landmark, bg:'rgba(99,102,241,0.12)', color:'#6366f1' },
@@ -116,6 +124,22 @@ async function fetchHistory() {
   } catch {} finally { historyLoading.value = false }
 }
 
+async function checkStatus(orderId) {
+  checkingIds.value.add(orderId)
+  try {
+    const res = await paymentApi.getStatus(orderId)
+    if (res.data.payment_status === 'settlement') {
+      // toast notification would be nice but we don't have access to it here easily without props/emit
+      // so we use simple alert or rely on UI update
+      alert(`Pembayaran ${orderId} sudah LUNAS!`)
+    } else {
+      alert(`Status: ${res.data.payment_status}`)
+    }
+    await fetchHistory()
+  } catch(e) { alert(e.message) }
+  finally { checkingIds.value.delete(orderId) }
+}
+
 async function simulateById(orderId) {
   try {
     await paymentApi.simulateSuccess(orderId)
@@ -124,10 +148,40 @@ async function simulateById(orderId) {
   } catch(e) { alert(e.message) }
 }
 
+async function openSnapPopup(ph) {
+  payingIds.value.add(ph.order_id)
+  try {
+    // Buat snap token baru (token lama bisa expired setelah 24 jam)
+    const snapRes = await paymentApi.createSnapToken(ph.transaksi_id)
+    const token = snapRes.data.snap_token
+
+    if (!window.snap) {
+      alert('Midtrans Snap belum siap. Coba refresh halaman, lalu ulangi.')
+      return
+    }
+
+    window.snap.pay(token, {
+      onSuccess: async () => {
+        alert('Pembayaran BERHASIL! Status akan diperbarui.')
+        await fetchHistory()
+      },
+      onPending: async () => {
+        alert('Menunggu konfirmasi bank. Status akan diperbarui otomatis.')
+        await fetchHistory()
+      },
+      onError: () => alert('Pembayaran gagal. Silakan coba lagi.'),
+      onClose: async () => { await fetchHistory() }
+    })
+  } catch(e) {
+    alert('Gagal membuka popup bayar: ' + e.message)
+  } finally {
+    payingIds.value.delete(ph.order_id)
+  }
+}
+
 onMounted(async () => {
   await Promise.all([fetchConfig(), fetchHistory()])
-  // Load Midtrans Snap JS
-  if(payConfig.value.snap_url) {
+  if(payConfig.value.snap_url && !document.querySelector(`script[src="${payConfig.value.snap_url}"]`)) {
     const s = document.createElement('script')
     s.src = payConfig.value.snap_url
     s.setAttribute('data-client-key', payConfig.value.client_key)
@@ -168,7 +222,14 @@ onMounted(async () => {
 .ph-amount{font-size:15px}
 .ph-bottom{display:flex;justify-content:space-between;font-size:11px}
 .ph-actions{margin-top:8px;display:flex;gap:6px}
-.btn-sim-sm{background:rgba(16,185,129,0.12);color:var(--c-emerald);border:1px solid rgba(16,185,129,0.2);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px}
+.btn-sim-sm{background:rgba(139,92,246,0.12);color:var(--c-purple);border:1px solid rgba(139,92,246,0.2);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;transition:0.2s}
+.btn-sim-sm:hover{background:rgba(139,92,246,0.2)}
+.btn-check-sm{background:rgba(16,185,129,0.12);color:var(--c-emerald);border:1px solid rgba(16,185,129,0.2);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;transition:0.2s}
+.btn-check-sm:hover{background:rgba(16,185,129,0.2)}
+.btn-check-sm:disabled{opacity:0.5;cursor:not-allowed}
+.btn-pay-now-sm{background:rgba(99,102,241,0.12);color:var(--c-indigo);border:1px solid rgba(99,102,241,0.25);padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;transition:0.2s}
+.btn-pay-now-sm:hover{background:rgba(99,102,241,0.22)}
+.btn-pay-now-sm:disabled{opacity:0.5;cursor:not-allowed}
 .btn-refresh-sm{background:transparent;border:none;color:var(--muted);cursor:pointer;padding:4px;display:flex}
 .btn-refresh-sm:hover{color:var(--text)}
 

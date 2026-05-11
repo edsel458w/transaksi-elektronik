@@ -387,7 +387,7 @@
               Tidak ada transaksi ditemukan.
             </div>
             <table class="data-table full" v-else>
-              <thead><tr><th>ID</th><th>Klien</th><th>Total</th><th>Kontrak</th><th>Status</th><th>Tanggal</th></tr></thead>
+              <thead><tr><th>ID</th><th>Klien</th><th>Total</th><th>Kontrak</th><th>Status</th><th>Tanggal</th><th>Aksi</th></tr></thead>
               <tbody>
                 <tr v-for="tx in filteredTx" :key="tx.id">
                   <td class="mono">#{{ tx.id }}</td>
@@ -406,6 +406,11 @@
                   </td>
                   <td><span class="badge" :class="tx.status">{{ tx.status }}</span></td>
                   <td class="muted">{{ tx.date }}</td>
+                  <td>
+                    <button v-if="tx.status === 'menunggu'" class="btn-pay-tx" @click="payExistingTransaction(tx)" :disabled="processing">
+                      <component :is="icons.CreditCard" size="13"/> Bayar
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -674,6 +679,7 @@ const permittedNavAdvanced = computed(() => {
   const role = authState.user.role
   if (role === 'admin') return navItemsAdvanced
   if (role === 'manajer') return navItemsAdvanced.filter(i => ['payment','io-system','laporan'].includes(i.id))
+  if (role === 'kasir') return navItemsAdvanced.filter(i => ['payment'].includes(i.id))
   return []
 })
 
@@ -724,7 +730,7 @@ const txFilterOpen = ref(false)
 const txFilterOptions = [
   { value: 'all', label: 'Semua Status' },
   { value: 'lunas', label: 'Lunas' },
-  { value: 'pending', label: 'Pending' }
+  { value: 'menunggu', label: 'Menunggu Bayar' }
 ]
 const getTxFilterLabel = computed(() => {
   const f = txFilterOptions.find(o => o.value === txFilter.value)
@@ -949,7 +955,18 @@ async function fetchContracts() {
   } catch (e) { console.error('Fetch kontrak error', e) }
 }
 
-async function finalizeCheckout(tx) {
+async function finalizeCheckout(tx, simulatePayment = false) {
+  if (simulatePayment) {
+    try {
+      // Cari payment record terkait untuk disimulasikan sukses
+      const payRes = await paymentApi.getHistory()
+      const myPay = payRes.data.find(p => p.transaksi_id === tx.id)
+      if (myPay) {
+        await paymentApi.simulateSuccess(myPay.order_id)
+      }
+    } catch (e) { console.error('Simulate payment error', e) }
+  }
+  
   await fetchTransactions()
   await fetchContracts()
   await fetchInventory()
@@ -961,6 +978,50 @@ async function finalizeCheckout(tx) {
   diskonPersen.value = 0; paymentMethod.value = 'tunai'; jumlahBayar.value = 0
   showToast(`Transaksi ${tx.kode} berhasil!`, 'success')
   processing.value = false
+}
+
+async function payExistingTransaction(tx) {
+  if (!tx._rawId) return
+  processing.value = true
+  try {
+    const snapRes = await paymentApi.createSnapToken(tx._rawId)
+    if (snapRes.data.is_demo) {
+      if (confirm('MODE DEMO: Simulasikan pembayaran BERHASIL untuk transaksi ini?')) {
+        await paymentApi.simulateSuccess(snapRes.data.order_id)
+        await fetchTransactions()
+        showToast('Pembayaran berhasil disimulasikan!', 'success')
+      }
+      processing.value = false
+      return
+    }
+    if (window.snap) {
+      window.snap.pay(snapRes.data.snap_token, {
+        onSuccess: async () => {
+          await fetchTransactions()
+          showToast(`Pembayaran ${tx.id} BERHASIL!`)
+          processing.value = false
+          currentPage.value = 'payment'
+        },
+        onPending: async () => {
+          await fetchTransactions()
+          showToast('Menunggu konfirmasi bank — cek di Monitoring Bayar.')
+          processing.value = false
+        },
+        onError: () => { showToast('Pembayaran gagal!', 'error'); processing.value = false },
+        onClose: async () => {
+          await fetchTransactions()
+          showToast('Popup ditutup.')
+          processing.value = false
+        }
+      })
+    } else if (snapRes.data.redirect_url) {
+      window.open(snapRes.data.redirect_url, '_blank')
+      processing.value = false
+    }
+  } catch (err) {
+    showToast('Gagal memulai pembayaran: ' + err.message, 'error')
+    processing.value = false
+  }
 }
 
 async function checkout() {
@@ -987,7 +1048,7 @@ async function checkout() {
         if (snapRes.data.is_demo) {
           // Jika mode demo (karena keys belum diisi di .env), tampilkan prompt simulasi
           if (confirm("MODE DEMO: Midtrans belum dikonfigurasi di .env.\n\nSimulasikan pembayaran BERHASIL untuk transaksi ini?")) {
-            await finalizeCheckout(tx)
+            await finalizeCheckout(tx, true)
           } else {
             processing.value = false
             showToast('Pembayaran dibatalkan (Mode Demo)', 'error')
@@ -998,11 +1059,18 @@ async function checkout() {
         if (window.snap) {
           window.snap.pay(snapRes.data.snap_token, {
             onSuccess: async () => await finalizeCheckout(tx),
-            onPending: async () => { showToast('Pembayaran pending.'); await finalizeCheckout(tx) },
+            onPending: async () => { showToast('Menunggu konfirmasi bank — cek di Monitoring Bayar.'); await finalizeCheckout(tx) },
             onError: () => { showToast('Pembayaran gagal!', 'error'); processing.value = false },
-            onClose: async () => { showToast('Popup ditutup.'); await finalizeCheckout(tx) }
+            onClose: async () => {
+              showToast('Popup ditutup. Transaksi disimpan, selesaikan di Monitoring Bayar.', 'error')
+              processing.value = false
+              cart.value = []; clientName.value = ''
+              diskonPersen.value = 0; paymentMethod.value = 'tunai'; jumlahBayar.value = 0
+              await fetchTransactions()
+              currentPage.value = 'payment'
+            }
           })
-          return 
+          return
         } else if (snapRes.data.redirect_url) {
           window.open(snapRes.data.redirect_url, '_blank')
         }
@@ -1018,40 +1086,60 @@ async function checkout() {
   }
 }
 
-function previewContract(item) {
+async function previewContract(item) {
   let kontrakId = item._rawId;
   if (item.id && item.id.startsWith('TRX')) {
     showToast('Membuka dokumen...', 'success');
-    fetch(`http://localhost:8000/transaction/${item._rawId}/receipt`, {
-      headers: { 'Authorization': `Bearer ${authState.token}` }
-    }).then(r => r.json()).then(res => {
+    try {
+      const r = await fetch(`http://localhost:8000/transaction/${item._rawId}/receipt`, {
+        headers: { 'Authorization': `Bearer ${authState.token}` }
+      });
+      const res = await r.json();
       if (res.data && res.data.kontrak) {
-        window.open(`http://localhost:8000/kontrak/${res.data.kontrak.id}/pdf?token=${authState.token}`, '_blank');
+        const blob = await kontrakApi.getPdfBlob(res.data.kontrak.id);
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
       } else {
         showToast('Kontrak belum tersedia', 'error');
       }
-    }).catch(() => showToast('Gagal memuat kontrak', 'error'));
+    } catch { showToast('Gagal memuat kontrak', 'error'); }
     return;
   }
-  window.open(`http://localhost:8000/kontrak/${kontrakId}/pdf?token=${authState.token}`, '_blank');
+  try {
+    const blob = await kontrakApi.getPdfBlob(kontrakId);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  } catch (e) { showToast('Gagal memuat PDF: ' + e.message, 'error'); }
 }
 
-function downloadContract(item) {
+async function downloadContract(item) {
   let kontrakId = item._rawId;
+  async function _download(id, filename) {
+    const blob = await kontrakApi.getPdfBlob(id);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
   if (item.id && item.id.startsWith('TRX')) {
     showToast('Mengunduh dokumen...', 'success');
-    fetch(`http://localhost:8000/transaction/${item._rawId}/receipt`, {
-      headers: { 'Authorization': `Bearer ${authState.token}` }
-    }).then(r => r.json()).then(res => {
+    try {
+      const r = await fetch(`http://localhost:8000/transaction/${item._rawId}/receipt`, {
+        headers: { 'Authorization': `Bearer ${authState.token}` }
+      });
+      const res = await r.json();
       if (res.data && res.data.kontrak) {
-        window.open(`http://localhost:8000/kontrak/${res.data.kontrak.id}/pdf?download=1&token=${authState.token}`, '_blank');
+        await _download(res.data.kontrak.id, `Kontrak_${res.data.kontrak.kode}.pdf`);
       } else {
         showToast('Kontrak belum tersedia', 'error');
       }
-    }).catch(() => showToast('Gagal memuat kontrak', 'error'));
+    } catch { showToast('Gagal mengunduh kontrak', 'error'); }
     return;
   }
-  window.open(`http://localhost:8000/kontrak/${kontrakId}/pdf?download=1&token=${authState.token}`, '_blank');
+  try {
+    await _download(kontrakId, `Kontrak_${item.id}.pdf`);
+  } catch (e) { showToast('Gagal mengunduh PDF: ' + e.message, 'error'); }
 }
 
 async function handleLogin() {
@@ -1272,8 +1360,11 @@ h1,h2,h3{font-family:'Outfit',sans-serif;letter-spacing:-0.02em}
 .data-table td{padding:16px;border-bottom:1px solid rgba(39,39,42,0.6);vertical-align:middle}
 .data-table tr:hover td{background:rgba(255,255,255,0.02)}
 .badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;text-transform:capitalize}
+.btn-pay-tx{background:rgba(99,102,241,0.12);color:var(--c-indigo);border:1px solid rgba(99,102,241,0.25);padding:5px 10px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:0.2s;white-space:nowrap}
+.btn-pay-tx:hover{background:rgba(99,102,241,0.22)}
+.btn-pay-tx:disabled{opacity:0.5;cursor:not-allowed}
 .badge.lunas{background:rgba(16,185,129,0.15);color:var(--c-emerald);border:1px solid rgba(16,185,129,0.2)}
-.badge.pending{background:rgba(245,158,11,0.15);color:var(--c-amber);border:1px solid rgba(245,158,11,0.2)}
+.badge.pending,.badge.menunggu{background:rgba(245,158,11,0.15);color:var(--c-amber);border:1px solid rgba(245,158,11,0.2)}
 .badge.warn{background:rgba(244,63,94,0.15);color:var(--c-rose);border:1px solid rgba(244,63,94,0.2)}
 
 /* UTILS */

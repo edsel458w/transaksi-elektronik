@@ -117,3 +117,25 @@ class IOLog(Base):
     user_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     user             = relationship("User")
+
+# ============================================================
+# Model Payment Log (Pencatatan pembayaran Midtrans)
+# ============================================================
+class PaymentLog(Base):
+    __tablename__ = "payment_logs"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    order_id         = Column(String(100), unique=True, index=True)
+    transaksi_id     = Column(Integer, ForeignKey("transaksi.id"))
+    transaksi_kode   = Column(String(20))
+    nama_klien       = Column(String(255))
+    gross_amount     = Column(Integer)
+    payment_type     = Column(String(50)) # snap, credit_card, etc.
+    payment_status   = Column(String(50)) # pending, settlement, etc.
+    snap_token       = Column(String(255), nullable=True)
+    is_demo          = Column(Boolean, default=False)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+    midtrans_response = Column(Text, nullable=True) # JSON string
+
+    transaksi        = relationship("Transaksi")
