@@ -1,5 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from collections import defaultdict
+from datetime import datetime, timezone
+import time
+import os
 from routers import inventory, transaction, auth, kontrak, io_system, deteksi_uang, midtrans_payment, laporan
 
 app = FastAPI(
@@ -8,13 +14,58 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# ── Security Headers Middleware ───────────────────────────────
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+# ── Rate Limiting Middleware (login endpoint) ─────────────────
+_login_attempts: dict = defaultdict(list)
+LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", 5))
+LOGIN_WINDOW_SECONDS = 60
+LOGIN_LOCKOUT_SECONDS = 900  # 15 menit
+
+class LoginRateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/auth/login" and request.method == "POST":
+            client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+            now = time.time()
+            attempts = _login_attempts[client_ip]
+            # Bersihkan attempts di luar window + lockout
+            _login_attempts[client_ip] = [t for t in attempts if now - t < LOGIN_LOCKOUT_SECONDS]
+            recent = [t for t in _login_attempts[client_ip] if now - t < LOGIN_WINDOW_SECONDS]
+            if len(recent) >= LOGIN_MAX_ATTEMPTS:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Terlalu banyak percobaan login. Coba lagi dalam 15 menit."},
+                    headers={"Retry-After": str(LOGIN_LOCKOUT_SECONDS)},
+                )
+            response = await call_next(request)
+            if response.status_code == 401:
+                _login_attempts[client_ip].append(now)
+            elif response.status_code == 200:
+                _login_attempts[client_ip] = []
+            return response
+        return await call_next(request)
+
+app.add_middleware(LoginRateLimitMiddleware)
+
 # CORS - izinkan frontend Vue
+_allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 from database import SessionLocal
@@ -50,9 +101,10 @@ def get_system_status():
             ],
             "sec_checks": [
                 {"name": "HTTPS / TLS 1.2+", "ok": True},
-                {"name": "Rate Limiting", "ok": False},
+                {"name": "Rate Limiting", "ok": True},
                 {"name": "JWT Authentication", "ok": True},
                 {"name": "Input Validation", "ok": True},
+                {"name": "Security Headers", "ok": True},
             ]
         }
     }

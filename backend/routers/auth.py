@@ -25,7 +25,6 @@ class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
-    role: RoleEnum = RoleEnum.kasir  # default role = kasir
 
     @field_validator("password")
     @classmethod
@@ -36,9 +35,10 @@ class RegisterRequest(BaseModel):
 
     @field_validator("username")
     @classmethod
-    def username_no_space(cls, v):
-        if " " in v:
-            raise ValueError("Username tidak boleh mengandung spasi.")
+    def username_valid(cls, v):
+        import re
+        if not re.match(r'^[a-zA-Z0-9_]{3,30}$', v):
+            raise ValueError("Username hanya boleh huruf, angka, underscore (3–30 karakter).")
         return v.lower()
 
 class LoginRequest(BaseModel):
@@ -78,7 +78,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         username  = payload.username,
         email     = payload.email,
         hashed_pw = hash_password(payload.password),
-        role      = payload.role,
+        role      = RoleEnum.kasir,
         is_active = True,
     )
     db.add(user)

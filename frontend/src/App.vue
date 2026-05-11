@@ -49,14 +49,6 @@
             <label>Password</label>
             <input type="password" v-model="registerForm.password" placeholder="Minimal 8 karakter" />
           </div>
-          <div class="form-group">
-            <label>Role</label>
-            <select v-model="registerForm.role" style="background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:12px 16px; border-radius:10px; outline:none; font-family:'Inter',sans-serif;">
-              <option value="kasir">Kasir</option>
-              <option value="manajer">Manajer</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
           <button class="btn-primary full-w mt-2" @click="handleRegister" :disabled="registerForm.loading">
             <component :is="registerForm.loading ? icons.Loader : icons.Plus" size="16" :class="{spin:registerForm.loading}"/>
             {{ registerForm.loading ? 'Memproses...' : 'Daftar' }}
@@ -688,7 +680,7 @@ const authState = reactive({
 
 const authView = ref('login')
 const loginForm = reactive({ username: '', password: '', loading: false })
-const registerForm = reactive({ username: '', email: '', password: '', role: 'kasir', loading: false })
+const registerForm = reactive({ username: '', email: '', password: '', loading: false })
 const forgotForm = reactive({ username: '', email: '', new_password: '', loading: false })
 
 const permittedNavMain = computed(() => {
@@ -1258,10 +1250,11 @@ async function handleRegister() {
   if(!registerForm.username || !registerForm.password || !registerForm.email) { showToast('Lengkapi form pendaftaran!', 'error'); return }
   registerForm.loading = true
   try {
-    const res = await fetch('http://localhost:8000/auth/register', {
+    const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const res = await fetch(`${BASE}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(registerForm)
+      body: JSON.stringify({ username: registerForm.username, email: registerForm.email, password: registerForm.password })
     })
     const data = await res.json()
     if(!res.ok) throw new Error(data.detail || 'Gagal mendaftar')
